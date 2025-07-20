@@ -1,0 +1,28 @@
+import SwiftUI
+
+struct FriendsPlaceholderView: View {
+    var body: some View {
+        VStack(spacing: 32) {
+            Up2Card {
+                VStack(spacing: 16) {
+                    Text("Friends / Connections")
+                        .font(Up2Typography.heading2)
+                        .foregroundColor(Up2Colors.primary)
+                    Text("This is a placeholder for the friends/connections screen.")
+                        .font(Up2Typography.bodyMedium)
+                        .foregroundColor(Up2Colors.textSecondary)
+                    Text("[Epic 0 Placeholder]")
+                        .font(Up2Typography.caption)
+                        .foregroundColor(Up2Colors.textTertiary)
+                }
+                .padding()
+            }
+        }
+        .padding()
+        .background(Up2Colors.background.ignoresSafeArea())
+    }
+}
+
+#Preview {
+    FriendsPlaceholderView()
+} 
