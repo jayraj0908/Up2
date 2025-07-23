@@ -40,7 +40,7 @@ final class NavigationCoordinator: ObservableObject, @preconcurrency NavigationC
         appStateManager: AppStateManager? = nil
     ) {
         self.configuration = configuration
-        self.appStateManager = appStateManager ?? AppStateManager.shared
+        self.appStateManager = appStateManager ?? AppStateManager()
         
         // Initialize with default state
         self.navigationState = NavigationState()
@@ -59,12 +59,8 @@ final class NavigationCoordinator: ObservableObject, @preconcurrency NavigationC
     
     private func setupObservers() {
         // Observe app state changes
-        appStateManager.$appFlow
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] appFlow in
-                self?.handleAppFlowChange(appFlow)
-            }
-            .store(in: &cancellables)
+        // Note: AppStateManager no longer has appFlow property
+        // We'll handle state changes through other means
         
         // Auto-save navigation state periodically
         Timer.publish(every: 30, on: .main, in: .common)
@@ -75,23 +71,9 @@ final class NavigationCoordinator: ObservableObject, @preconcurrency NavigationC
             .store(in: &cancellables)
     }
     
-    private func handleAppFlowChange(_ appFlow: AppStateManager.AppFlow) {
-        switch appFlow {
-        case .authentication:
-            // Clear navigation state when returning to authentication
-            clearNavigationState()
-        case .registration:
-            // User is in registration - navigation will be handled by registration flow
-            clearNavigationState()
-        case .profileSetup:
-            // User is in profile setup - navigation will be handled by profile flow
-            break
-        case .mainApp:
-            // User entered main app - restore or initialize navigation
-            if configuration.persistNavigationState {
-                restoreNavigationState()
-            }
-        }
+    private func handleAppFlowChange(_ appFlow: String) {
+        // This method is no longer needed as AppStateManager no longer has appFlow
+        // Navigation state will be managed through other state changes
     }
     
     // MARK: - Navigation Methods

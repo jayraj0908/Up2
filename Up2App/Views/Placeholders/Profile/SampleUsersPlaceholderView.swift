@@ -1,6 +1,19 @@
 import SwiftUI
 
+struct SampleUser {
+    let name: String
+    let vibe: String
+    let bio: String
+}
+
 struct SampleUsersPlaceholderView: View {
+    private let sampleUsers = [
+        SampleUser(name: "Alex Chen", vibe: "Adventure Seeker", bio: "Always looking for the next exciting event to attend"),
+        SampleUser(name: "Sarah Johnson", vibe: "Social Butterfly", bio: "Love connecting with new people at events"),
+        SampleUser(name: "Mike Rodriguez", vibe: "Music Lover", bio: "Passionate about live music and concerts"),
+        SampleUser(name: "Emma Wilson", vibe: "Foodie", bio: "Exploring culinary events and food festivals")
+    ]
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -18,7 +31,7 @@ struct SampleUsersPlaceholderView: View {
                     }
                     .padding()
                 }
-                ForEach(PlaceholderData.users) { user in
+                ForEach(sampleUsers, id: \.name) { user in
                     Up2Card {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(user.name)

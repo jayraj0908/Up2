@@ -6,7 +6,6 @@ struct TabNavigationView: View {
     // MARK: - Environment and State
     @ObservedObject var navigationCoordinator: NavigationCoordinator
     @EnvironmentObject var appStateManager: AppStateManager
-    // Create event state removed - functionality moved to "Become a Host"
     
     // MARK: - Tab Items Configuration
     private var tabItems: [Up2TabBar.TabItem] {
@@ -24,42 +23,124 @@ struct TabNavigationView: View {
     // MARK: - Body
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                // Main Content Area
-                contentArea
+            // Main Tab View
+            TabView(selection: $navigationCoordinator.selectedTab) {
+                ForYouTabView()
+                    .tag(AppTab.forYou)
                 
-                // Tab Bar
-                tabBarSection
+                MapTabView()
+                    .tag(AppTab.map)
+                
+                TrendingTabView()
+                    .tag(AppTab.trending)
+                
+                ProfileTabView()
+                    .tag(AppTab.profile)
+                
+                MoreTabView()
+                    .tag(AppTab.more)
             }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             
-            // Floating Action Button for Create Event - REMOVED
-            // Create event functionality moved to "Become a Host" in More tab
+            // Custom Tab Bar
+            VStack {
+                Spacer()
+                                           Up2TabBar(
+                               items: tabItems,
+                               selectedTab: Binding(
+                                   get: { navigationCoordinator.selectedTab.rawValue },
+                                   set: { _ in }
+                               ),
+                               onTabSelected: { tabId in
+                                   handleTabSelection(tabId)
+                               }
+                           )
+            }
         }
-        .sheet(item: Binding<NavigationDestination?>(
-            get: { navigationCoordinator.presentedModal },
-            set: { _ in navigationCoordinator.dismissModal() }
-        )) { destination in
-            modalContent(for: destination)
-        }
-        // Create event sheet removed - functionality moved to "Become a Host"
-        .onOpenURL { url in
-            handleDeepLink(url)
+        .environmentObject(appStateManager)
+    }
+    
+    // MARK: - Tab Selection Handler
+    private func handleTabSelection(_ tabId: String) {
+        guard let tab = AppTab(rawValue: tabId) else { return }
+        
+        // Check if user can access this tab
+        if canAccessTab(tab) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                navigationCoordinator.selectedTab = tab
+            }
+        } else {
+            // Show soft gate overlay
+            showSoftGateOverlay(for: tab)
         }
     }
     
-    // MARK: - Content Area
-    private var contentArea: some View {
-        ZStack {
-            // Tab Content
-            ForEach(AppTab.allCases, id: \.rawValue) { tab in
-                if tab == navigationCoordinator.selectedTab {
-                    tabContentView(for: tab)
-                        .transition(.opacity)
-                }
-            }
+    // MARK: - Access Control
+    private func canAccessTab(_ tab: AppTab) -> Bool {
+        // Development mode: allow all tabs for testing
+        #if DEBUG
+        return true
+        #else
+        switch tab {
+        case .forYou, .map, .trending:
+            return true // Always accessible to guests
+        case .profile, .more:
+            return appStateManager.isAuthenticated // Require authentication
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.2), value: navigationCoordinator.selectedTab)
+        #endif
+    }
+    
+    private func showSoftGateOverlay(for tab: AppTab) {
+        // Show login modal for restricted tabs
+        navigationCoordinator.presentModal(.login)
+    }
+    
+    // MARK: - Blur Overlay for Restricted Tabs
+    @ViewBuilder
+    private func blurOverlay(for tab: AppTab) -> some View {
+        ZStack {
+            // Blur background
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+            
+            // Login prompt
+            VStack(spacing: Up2Spacing.lg) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 48, weight: .light))
+                    .foregroundColor(Up2Colors.textOnPrimary)
+                
+                Text("Sign in to access \(tab.title)")
+                    .font(Up2Typography.heading2)
+                    .foregroundColor(Up2Colors.textOnPrimary)
+                    .multilineTextAlignment(.center)
+                
+                Text("Create an account to unlock all features")
+                    .font(Up2Typography.bodyMedium)
+                    .foregroundColor(Up2Colors.textOnPrimary.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                
+                Up2Button(
+                    "Sign In",
+                    style: .primary,
+                    action: {
+                        navigationCoordinator.presentModal(.login)
+                    }
+                )
+                .frame(maxWidth: 200)
+            }
+            .padding(Up2Spacing.xl)
+        }
+    }
+    
+    // MARK: - Check if Tab is Restricted
+    private func isRestrictedTab(_ tab: AppTab) -> Bool {
+        switch tab {
+        case .forYou, .map, .trending:
+            return false // These tabs are accessible to guests
+        case .profile, .more:
+            return true // These tabs require authentication
+        }
     }
     
     // MARK: - Tab Content Views
@@ -174,25 +255,6 @@ struct TabNavigationView: View {
     }
     
     // MARK: - Helper Methods
-    
-    private func handleTabSelection(_ tabId: String) {
-        guard let selectedTab = AppTab(rawValue: tabId) else { return }
-        
-        // Add haptic feedback
-        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-        impactFeedback.impactOccurred()
-        
-        // Handle double-tap to scroll to top or pop to root
-        if navigationCoordinator.selectedTab == selectedTab {
-            // Same tab tapped - pop to root if there's a navigation stack
-            if navigationCoordinator.canNavigateBack(in: selectedTab) {
-                navigationCoordinator.popToRoot(for: selectedTab)
-            }
-            // TODO: Add scroll to top functionality when we implement the tab content views
-        }
-        
-        print("📱 Tab selected: \(selectedTab.title)")
-    }
     
     private func handleDeepLink(_ url: URL) {
         print("🔗 Deep link received: \(url)")

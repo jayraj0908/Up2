@@ -38,8 +38,8 @@ final class AppInitializationService: ObservableObject, AppInitializationService
     
     // MARK: - Initialization
     init(
-        authService: SupabaseAuthService = SupabaseAuthService.shared,
-        appStateManager: AppStateManager = AppStateManager.shared,
+        authService: SupabaseAuthService,
+        appStateManager: AppStateManager,
         userDefaults: UserDefaults = .standard
     ) {
         self.authService = authService
@@ -146,17 +146,10 @@ final class AppInitializationService: ObservableObject, AppInitializationService
             let isAuthenticated = authService.isAuthenticated
             
             if isAuthenticated {
-                // Get current session to verify it's still valid
                 let session = authService.currentSession
                 if let session = session, let userId = session.user.id.uuidString as String? {
-                    // Check if user needs onboarding
-                    let needsOnboarding = await checkIfUserNeedsOnboarding(userId: userId)
-                    
-                    if needsOnboarding {
-                        return .success(.needsOnboarding)
-                    } else {
+                    // Skip onboarding check - go directly to authenticated
                         return .success(.authenticated(userId: userId))
-                    }
                 } else {
                     return .success(.expired)
                 }
@@ -207,8 +200,8 @@ final class AppInitializationService: ObservableObject, AppInitializationService
         configuration: AppConfiguration
     ) async throws -> InitializationResult {
         
-        // Get onboarding status
-        let hasCompletedOnboarding = userDefaults.bool(forKey: UserDefaultsKeys.hasCompletedOnboarding)
+        // Skip onboarding check - always set to true
+        let hasCompletedOnboarding = true
         
         // Get last launch date
         let lastLaunchDate = userDefaults.object(forKey: UserDefaultsKeys.lastLaunchDate) as? Date
@@ -221,8 +214,9 @@ final class AppInitializationService: ObservableObject, AppInitializationService
             lastLaunchDate: lastLaunchDate
         )
         
-        // Update app state manager
-        await appStateManager.updateInitializationResult(result)
+        // Update app state manager based on initialization result
+        // The AppStateManager now handles state through soft gates
+        // We'll let the calling code handle the navigation based on the result
         
         return result
     }

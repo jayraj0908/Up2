@@ -17,5 +17,5 @@ struct ForYouTabView: View {
 #Preview {
     ForYouTabView()
         .environmentObject(NavigationCoordinator())
-        .environmentObject(AppStateManager.shared)
+        .environmentObject(AppStateManager())
 } 

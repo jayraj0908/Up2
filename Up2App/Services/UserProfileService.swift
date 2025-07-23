@@ -55,6 +55,7 @@ enum ProfileError: LocalizedError {
     case profileCreationFailed
     case profileUpdateFailed
     case networkError
+    case invalidUserId(String)
     
     var errorDescription: String? {
         switch self {
@@ -66,6 +67,8 @@ enum ProfileError: LocalizedError {
             return "Failed to update user profile."
         case .networkError:
             return "Network error. Please try again."
+        case .invalidUserId(let message):
+            return "Invalid user ID: \(message)"
         }
     }
 } 

@@ -213,7 +213,7 @@ class KeychainService {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         
-        return (result as? Data)
+        return status == errSecSuccess ? (result as? Data) : nil
     }
     
     func delete(forKey key: String) -> Bool {

@@ -11,49 +11,182 @@ struct ProfileTabView: View {
     @State private var showingEditProfile = false
     @State private var showingSettings = false
     @State private var refreshing = false
+    @State private var showingLoginSheet = false
     
     // MARK: - Body
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Background - Consistent with host onboarding theme
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black,
-                        Color(red: 0.1, green: 0.0, blue: 0.3),
-                        Color(red: 0.3, green: 0.0, blue: 0.4)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Header
-                    profileHeader
+        ZStack {
+            // Liquid Glass Background
+            Up2LiquidGlassBackground()
+            
+            // Main Profile Content
+            if appStateManager.isAuthenticated {
+                authenticatedProfileView
+            } else {
+                guestProfileView
+            }
+            
+            // Soft Gate Overlay for Guest Users
+            if !appStateManager.isAuthenticated {
+                softGateOverlay
+            }
+        }
+        .sheet(isPresented: $showingLoginSheet) {
+            LoginView()
+        }
+    }
+    
+    // MARK: - Authenticated Profile View
+    private var authenticatedProfileView: some View {
+        VStack {
+            Text("Profile")
+                .font(Up2Typography.heading1)
+                .foregroundColor(Up2Colors.textInverse)
+            
+            if let user = appStateManager.currentUser {
+                VStack(spacing: Up2Spacing.lg) {
+                    // Profile Avatar
+                    Circle()
+                        .fill(Up2Colors.primary)
+                        .frame(width: 80, height: 80)
+                        .overlay(
+                            Text(String(user.fullName.prefix(1)).uppercased())
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .foregroundColor(Up2Colors.textInverse)
+                        )
                     
-                    // Content
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            // Quick Stats
-                            quickStats
-                            
-                            // Profile Actions
-                            profileActions
-                            
-                            // Recent Activity
-                            recentActivity
-                            
-                            // Sign Out Section
-                            signOutSection
+                    // User Info
+                    VStack(spacing: Up2Spacing.sm) {
+                        Text(user.fullName)
+                            .font(Up2Typography.heading2)
+                            .foregroundColor(Up2Colors.textInverse)
+                        
+                        Text(user.email)
+                            .font(Up2Typography.bodySmall)
+                            .foregroundColor(Up2Colors.textSecondary)
+                    }
+                    
+                    // Profile Actions
+                    VStack(spacing: Up2Spacing.md) {
+                        Up2Button("Edit Profile", style: .secondary) {
+                            // TODO: Navigate to profile edit
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 100) // Account for tab bar
+                        
+                        Up2Button("Sign Out", style: .destructive) {
+                            Task {
+                                await appStateManager.signOut()
+                            }
+                        }
+                    }
+                    .padding(.top, Up2Spacing.xl)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding()
+    }
+    
+    // MARK: - Guest Profile View (Blurred)
+    private var guestProfileView: some View {
+        VStack {
+            Text("Profile")
+                .font(Up2Typography.heading1)
+                .foregroundColor(Up2Colors.textInverse)
+            
+            VStack(spacing: Up2Spacing.lg) {
+                // Blurred Profile Avatar
+                Circle()
+                    .fill(Up2Colors.primary.opacity(0.3))
+                    .frame(width: 80, height: 80)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.title)
+                            .foregroundColor(Up2Colors.textInverse.opacity(0.5))
+                    )
+                    .blur(radius: 2)
+                
+                // Blurred User Info
+                VStack(spacing: Up2Spacing.sm) {
+                    Text("Guest User")
+                        .font(Up2Typography.heading2)
+                        .foregroundColor(Up2Colors.textInverse.opacity(0.5))
+                        .blur(radius: 1)
+                    
+                    Text("Sign in to view your profile")
+                        .font(Up2Typography.bodySmall)
+                        .foregroundColor(Up2Colors.textSecondary.opacity(0.5))
+                        .blur(radius: 1)
+                }
+                
+                Spacer()
+            }
+        }
+        .padding()
+    }
+    
+    // MARK: - Soft Gate Overlay
+    private var softGateOverlay: some View {
+        VStack {
+            Spacer()
+            
+            VStack(spacing: Up2Spacing.lg) {
+                // Lock Icon
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(Up2Colors.accent)
+                
+                // Message
+                VStack(spacing: Up2Spacing.sm) {
+                    Text("Sign In to Access Profile")
+                        .font(Up2Typography.heading2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Up2Colors.textInverse)
+                    
+                    Text("Create an account or sign in to view and manage your profile, events, and preferences.")
+                        .font(Up2Typography.bodySmall)
+                        .foregroundColor(Up2Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Up2Spacing.xl)
+                }
+                
+                // Action Buttons
+                VStack(spacing: Up2Spacing.md) {
+                    Up2Button("Sign In", style: .primary) {
+                        showingLoginSheet = true
+                    }
+                    
+                    Up2Button("Continue Browsing", style: .secondary) {
+                        // Dismiss overlay - user can continue browsing
                     }
                 }
             }
-            .navigationBarHidden(true)
+            .padding(Up2Spacing.xl)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Up2Colors.primary.opacity(0.3), Up2Colors.accent.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .padding(.horizontal, Up2Spacing.lg)
+            
+            Spacer()
         }
+        .background(
+            Rectangle()
+                .fill(.black.opacity(0.3))
+                .ignoresSafeArea()
+        )
     }
     
     // MARK: - Profile Header
@@ -99,11 +232,11 @@ struct ProfileTabView: View {
                 // User info
                 VStack(alignment: .leading, spacing: 4) {
                     if let user = appStateManager.currentUser {
-                        Text(user.email?.components(separatedBy: "@").first ?? user.phone ?? "User")
+                        Text(user.email.components(separatedBy: "@").first ?? "User")
                             .font(.title2)
                             .fontWeight(.semibold)
                         
-                        Text(user.email ?? user.phone ?? "No contact info")
+                        Text(user.email ?? "No contact info")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         
@@ -302,7 +435,9 @@ struct ProfileTabView: View {
     private var signOutSection: some View {
         VStack(spacing: 16) {
             Button("Sign Out") {
-                appStateManager.signOut()
+                Task {
+                    await appStateManager.signOut()
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: 50)

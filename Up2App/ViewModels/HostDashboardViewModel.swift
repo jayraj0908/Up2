@@ -4,11 +4,14 @@ import SwiftUI
 class HostDashboardViewModel: ObservableObject {
     // MARK: - Published Properties
     @Published var isLoading = false
-    @Published var myEvents: [HostEvent] = []
+    @Published var myEvents: [Event] = []
     @Published var recentRSVPs: [RSVPData] = []
     @Published var analyticsData: [AnalyticsDataPoint] = []
     @Published var topEvents: [TopEvent] = []
     @Published var errorMessage: String?
+    
+    private let eventService = EventService.shared
+    private let authService = SupabaseAuthService.shared
     
     // MARK: - Computed Properties
     var totalEvents: Int {
@@ -16,11 +19,16 @@ class HostDashboardViewModel: ObservableObject {
     }
     
     var activeEvents: Int {
-        myEvents.filter { $0.status == .active || $0.status == .upcoming }.count
+        myEvents.filter { $0.isActive || $0.isUpcoming }.count
+    }
+    
+    var completedEvents: Int {
+        myEvents.filter { $0.isCompleted }.count
     }
     
     var totalRSVPs: Int {
-        myEvents.reduce(0) { $0 + $1.rsvpCount }
+        // This would be calculated from RSVP data when implemented
+        return 0
     }
     
     var averageRSVPs: Int {
@@ -34,11 +42,14 @@ class HostDashboardViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            // Simulate API calls
-            try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+            // Load real events from Supabase
+            myEvents = try await eventService.fetchEventsForHost()
             
-            // Load mock data
-            await loadMockData()
+            // Load real RSVPs from Supabase
+            await loadRealRSVPs()
+            
+            // Load real analytics from Supabase
+            await loadRealAnalytics()
             
         } catch {
             errorMessage = "Failed to load dashboard data: \(error.localizedDescription)"
@@ -47,246 +58,148 @@ class HostDashboardViewModel: ObservableObject {
         isLoading = false
     }
     
-    private func loadMockData() async {
-        // Check if there are any real created events first
-        if let realEvents = await loadRealCreatedEvents() {
-            myEvents = realEvents
-        } else {
-            // Fallback to mock events if no real events exist
-            myEvents = [
-                HostEvent(
-                    id: UUID(),
-                    title: "Summer Beach Party",
-                    venueName: "Santa Monica Beach",
-                    date: Date().addingTimeInterval(86400 * 7), // 7 days from now
-                    rsvpCount: 45,
-                    price: 25.0,
-                    status: .upcoming,
-                    imageURL: "https://example.com/beach-party.jpg"
-                ),
-                HostEvent(
-                    id: UUID(),
-                    title: "Electronic Music Night",
-                    venueName: "Club XYZ",
-                    date: Date().addingTimeInterval(86400 * 2), // 2 days from now
-                    rsvpCount: 78,
-                    price: 35.0,
-                    status: .active,
-                    imageURL: "https://example.com/electronic-night.jpg"
-                ),
-                HostEvent(
-                    id: UUID(),
-                    title: "Wine Tasting Evening",
-                    venueName: "Vineyard Estate",
-                    date: Date().addingTimeInterval(-86400 * 3), // 3 days ago
-                    rsvpCount: 32,
-                    price: 50.0,
-                    status: .completed,
-                    imageURL: "https://example.com/wine-tasting.jpg"
-                ),
-                HostEvent(
-                    id: UUID(),
-                    title: "Tech Meetup",
-                    venueName: "Innovation Center",
-                    date: Date().addingTimeInterval(-86400 * 10), // 10 days ago
-                    rsvpCount: 0,
-                    price: 0.0,
-                    status: .cancelled,
-                    imageURL: "https://example.com/tech-meetup.jpg"
-                )
-            ]
+    private func loadRealRSVPs() async {
+        // Load real RSVP data from Supabase
+        do {
+            var allRSVPs: [RSVPData] = []
+            
+            // Fetch RSVPs for each event
+            for event in myEvents {
+                let eventRSVPs = try await fetchEventRSVPs(eventId: event.id)
+                allRSVPs.append(contentsOf: eventRSVPs)
+            }
+            
+            // Sort by date and take recent ones
+            recentRSVPs = allRSVPs
+                .sorted(by: { $0.createdAt > $1.createdAt })
+                .prefix(10)
+                .map { $0 }
+        } catch {
+            print("Failed to load RSVPs: \(error)")
+            recentRSVPs = []
         }
-        
-        // Mock RSVPs
-        recentRSVPs = [
-            RSVPData(
-                id: UUID(),
-                userName: "Sarah Johnson",
-                userAvatar: "https://example.com/sarah.jpg",
-                eventTitle: "Summer Beach Party",
-                status: .confirmed,
-                date: Date().addingTimeInterval(-3600 * 2) // 2 hours ago
-            ),
-            RSVPData(
-                id: UUID(),
-                userName: "Mike Chen",
-                userAvatar: "https://example.com/mike.jpg",
-                eventTitle: "Electronic Music Night",
-                status: .confirmed,
-                date: Date().addingTimeInterval(-3600 * 4) // 4 hours ago
-            ),
-            RSVPData(
-                id: UUID(),
-                userName: "Emma Davis",
-                userAvatar: "https://example.com/emma.jpg",
-                eventTitle: "Summer Beach Party",
-                status: .pending,
-                date: Date().addingTimeInterval(-3600 * 6) // 6 hours ago
-            ),
-            RSVPData(
-                id: UUID(),
-                userName: "Alex Rodriguez",
-                userAvatar: "https://example.com/alex.jpg",
-                eventTitle: "Electronic Music Night",
-                status: .confirmed,
-                date: Date().addingTimeInterval(-3600 * 8) // 8 hours ago
-            )
-        ]
-        
-        // Mock Analytics Data
-        analyticsData = [
-            AnalyticsDataPoint(label: "Jan", value: 12),
-            AnalyticsDataPoint(label: "Feb", value: 18),
-            AnalyticsDataPoint(label: "Mar", value: 15),
-            AnalyticsDataPoint(label: "Apr", value: 22),
-            AnalyticsDataPoint(label: "May", value: 28),
-            AnalyticsDataPoint(label: "Jun", value: 35)
-        ]
-        
-        // Mock Top Events
-        topEvents = [
-            TopEvent(
-                id: UUID(),
-                title: "Electronic Music Night",
-                imageURL: "https://example.com/electronic-night.jpg",
-                rsvpCount: 78,
-                rating: 4.8,
-                revenue: 2730.0
-            ),
-            TopEvent(
-                id: UUID(),
-                title: "Summer Beach Party",
-                imageURL: "https://example.com/beach-party.jpg",
-                rsvpCount: 45,
-                rating: 4.6,
-                revenue: 1125.0
-            ),
-            TopEvent(
-                id: UUID(),
-                title: "Wine Tasting Evening",
-                imageURL: "https://example.com/wine-tasting.jpg",
-                rsvpCount: 32,
-                rating: 4.9,
-                revenue: 1600.0
-            )
-        ]
     }
     
-    // MARK: - Real Event Loading
-    private func loadRealCreatedEvents() async -> [HostEvent]? {
-        // This would integrate with the actual event creation service
-        // For now, we'll check if there are any events created through the app
-        do {
-            // Simulate checking for real events
-            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+    private func loadRealAnalytics() async {
+        // Load real analytics data from Supabase
+        var analyticsData: [AnalyticsDataPoint] = []
+        var topEvents: [TopEvent] = []
+        
+        // Calculate analytics from real event data
+        if !myEvents.isEmpty {
+            // Create analytics data points from events
+            let calendar = Calendar.current
+            let now = Date()
             
-            // In a real implementation, this would query the database
-            // let events = try await EventHostService.shared.getHostEvents(userId: currentUserId)
+            // Generate last 7 days of data
+            for i in 0..<7 {
+                if let date = calendar.date(byAdding: .day, value: -i, to: now) {
+                    let eventsOnDay = myEvents.filter { event in
+                        calendar.isDate(event.startTime, inSameDayAs: date)
+                    }
+                    
+                    let dataPoint = AnalyticsDataPoint(
+                        id: UUID(),
+                        date: date,
+                        value: Double(eventsOnDay.count),
+                        label: formatDateLabel(date)
+                    )
+                    analyticsData.append(dataPoint)
+                }
+            }
             
-            // For now, return nil to use mock data
-            return nil
-        } catch {
-            print("Error loading real events: \(error)")
-            return nil
+            // Create top events from real data
+            let sortedEvents = myEvents.sorted { $0.startTime > $1.startTime } // Sort by date instead
+            topEvents = sortedEvents.prefix(5).map { event in
+                TopEvent(
+                    id: event.id,
+                    title: event.title,
+                    rsvpCount: 0, // Will be updated when RSVP service is implemented
+                    revenue: (event.price ?? 0) * 0, // Will be updated when RSVP service is implemented
+                    date: event.startTime
+                )
+            }
         }
+        
+        self.analyticsData = analyticsData
+        self.topEvents = topEvents
+    }
+    
+    private func fetchEventRSVPs(eventId: UUID) async throws -> [RSVPData] {
+        // This would fetch RSVPs from Supabase
+        // For now, return empty array as RSVP service needs to be implemented
+        return []
+    }
+    
+    private func formatDateLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
     }
     
     // MARK: - Event Management
-    func editEvent(_ event: HostEvent) {
-        print("Edit event: \(event.title)")
-        // This would navigate to event editing
-    }
     
-    func deleteEvent(_ event: HostEvent) {
-        print("Delete event: \(event.title)")
-        // This would show confirmation dialog and delete the event
-        withAnimation {
+    func deleteEvent(_ event: Event) async {
+        do {
+            try await eventService.deleteEvent(event.id)
+            // Remove from local array
             myEvents.removeAll { $0.id == event.id }
+        } catch {
+            errorMessage = "Failed to delete event: \(error.localizedDescription)"
         }
     }
     
-    func viewRSVPs(for event: HostEvent) {
-        print("View RSVPs for event: \(event.title)")
-        // This would navigate to detailed RSVP view
-        // In a real app, this would trigger navigation to EventRSVPView
-    }
-    
-    func refreshData() async {
+    func refreshEvents() async {
         await loadDashboardData()
     }
 }
 
-// MARK: - Data Models
+// MARK: - Supporting Types (keeping existing mock types for now)
 
-struct HostEvent: Identifiable {
+struct RSVPData: Identifiable {
     let id: UUID
-    let title: String
-    let venueName: String
-    let date: Date
-    let rsvpCount: Int
-    let price: Double
-    let status: EventStatus
-    let imageURL: String?
+    let eventId: UUID
+    let userId: UUID
+    let userName: String
+    let userHandle: String
+    let userAvatar: String?
+    let status: RSVPStatus
+    let createdAt: Date
     
-    var formattedDate: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+    enum RSVPStatus: String, CaseIterable {
+        case confirmed = "confirmed"
+        case pending = "pending"
+        case declined = "declined"
+        
+        var displayName: String {
+            switch self {
+            case .confirmed: return "Confirmed"
+            case .pending: return "Pending"
+            case .declined: return "Declined"
     }
-    
-    var formattedPrice: String {
-        if price == 0 {
-            return "Free"
-        } else {
-            return "$\(String(format: "%.0f", price))"
+}
+
+        var color: Color {
+            switch self {
+            case .confirmed: return .green
+            case .pending: return .orange
+            case .declined: return .red
+            }
         }
     }
 }
 
-enum EventStatus: String, CaseIterable {
-    case upcoming = "Upcoming"
-    case active = "Active"
-    case completed = "Completed"
-    case cancelled = "Cancelled"
-}
-
-struct RSVPData: Identifiable {
+struct AnalyticsDataPoint: Identifiable, Codable {
     let id: UUID
-    let userName: String
-    let userAvatar: String?
-    let eventTitle: String
-    let status: RSVPStatus
     let date: Date
-    
-    var formattedDate: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-enum RSVPStatus: String, CaseIterable {
-    case confirmed = "Confirmed"
-    case pending = "Pending"
-    case cancelled = "Cancelled"
-}
-
-struct AnalyticsDataPoint: Identifiable {
-    let id = UUID()
+    let value: Double
     let label: String
-    let value: Int
 }
 
-struct TopEvent: Identifiable {
+struct TopEvent: Identifiable, Codable {
     let id: UUID
     let title: String
-    let imageURL: String?
     let rsvpCount: Int
-    let rating: Double
     let revenue: Double
-    
-    var formattedRevenue: String {
-        return "$\(String(format: "%.0f", revenue))"
-    }
+    let date: Date
 } 

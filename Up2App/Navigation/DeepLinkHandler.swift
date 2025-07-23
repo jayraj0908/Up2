@@ -24,7 +24,7 @@ final class DeepLinkHandler: ObservableObject {
         appStateManager: AppStateManager? = nil
     ) {
         self.navigationCoordinator = navigationCoordinator
-        self.appStateManager = appStateManager ?? AppStateManager.shared
+        self.appStateManager = appStateManager ?? AppStateManager()
         
         setupObservers()
     }
@@ -32,12 +32,8 @@ final class DeepLinkHandler: ObservableObject {
     // MARK: - Setup
     private func setupObservers() {
         // Observe app state changes to handle pending deep links
-        appStateManager.$appFlow
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] appFlow in
-                self?.handleAppFlowChange(appFlow)
-            }
-            .store(in: &cancellables)
+        // Note: AppStateManager no longer has appFlow property
+        // We'll handle state changes through other means
     }
     
     private var cancellables = Set<AnyCancellable>()
@@ -131,7 +127,7 @@ final class DeepLinkHandler: ObservableObject {
     }
     
     private var isUserAuthenticated: Bool {
-        return appStateManager.isUserAuthenticated
+        return appStateManager.isAuthenticated
     }
     
     private func isDestinationAccessible(_ destination: NavigationDestination) -> Bool {
@@ -143,11 +139,11 @@ final class DeepLinkHandler: ObservableObject {
             
         case .profileSetup:
             // Profile setup is only accessible when authenticated but profile incomplete
-            return isUserAuthenticated && !appStateManager.hasProfileSetup
+            return isUserAuthenticated && appStateManager.softGateState == .profileRequired
             
         case .tab(.forYou), .tab(.map), .tab(.trending), .tab(.profile), .tab(.more):
             // Main app tabs require authentication and completed profile
-            return isUserAuthenticated && appStateManager.hasProfileSetup
+            return isUserAuthenticated && appStateManager.softGateState == .complete
             
         case .eventDetail, .eventMap, .eventSearch:
             // Event-related destinations require authentication
@@ -206,20 +202,22 @@ final class DeepLinkHandler: ObservableObject {
     }
     
     private func handleAuthenticationDestination(_ destination: NavigationDestination) {
-        // For authentication-related destinations, we need to work with the app flow
+        // For authentication-related destinations, we need to work with the app state
         switch destination {
         case .login:
             if !isUserAuthenticated {
-                appStateManager.appFlow = .authentication
+                // Navigate to login - this will be handled by the main app flow
+                print("🔗 DeepLinkHandler: Navigate to login")
             }
         case .registration:
             if !isUserAuthenticated {
-                appStateManager.appFlow = .authentication
-                // Could add additional state to specify registration vs login
+                // Navigate to registration - this will be handled by the main app flow
+                print("🔗 DeepLinkHandler: Navigate to registration")
             }
         case .profileSetup:
-            if isUserAuthenticated && !appStateManager.hasProfileSetup {
-                appStateManager.appFlow = .profileSetup
+            if isUserAuthenticated && appStateManager.softGateState == .profileRequired {
+                // Profile setup is already being handled by soft gate
+                print("🔗 DeepLinkHandler: Profile setup in progress")
             }
         default:
             break
@@ -228,17 +226,9 @@ final class DeepLinkHandler: ObservableObject {
     
     // MARK: - App Flow Handling
     
-    private func handleAppFlowChange(_ appFlow: AppStateManager.AppFlow) {
-        switch appFlow {
-        case .mainApp:
-            // When user reaches main app, process any pending deep links
-            if pendingDeepLink != nil {
-                processPendingDeepLink()
-            }
-        case .authentication, .registration, .profileSetup:
-            // Don't process pending links during authentication flows
-            break
-        }
+    private func handleAppFlowChange(_ appFlow: String) {
+        // This method is no longer needed as AppStateManager no longer has appFlow
+        // Deep link handling will be done through other state changes
     }
     
     // MARK: - History and Analytics
@@ -294,9 +284,9 @@ final class DeepLinkHandler: ObservableObject {
     
     private func getCurrentAppState() -> AppStateSnapshot {
         return AppStateSnapshot(
-            appFlow: appStateManager.appFlow,
+            appFlow: "main", // Default to main since appFlow no longer exists
             isAuthenticated: isUserAuthenticated,
-            hasProfileSetup: appStateManager.hasProfileSetup,
+            hasProfileSetup: appStateManager.softGateState == .complete,
             selectedTab: navigationCoordinator?.selectedTab ?? .forYou // Use optional chaining
         )
     }
@@ -459,7 +449,7 @@ enum DeepLinkPendingReason {
 }
 
 struct AppStateSnapshot {
-    let appFlow: AppStateManager.AppFlow
+    let appFlow: String
     let isAuthenticated: Bool
     let hasProfileSetup: Bool
     let selectedTab: AppTab

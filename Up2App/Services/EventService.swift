@@ -6,370 +6,376 @@ class EventService: ObservableObject {
     static let shared = EventService()
     
     private let authService = SupabaseAuthService.shared
-    private var supabase: SupabaseClient { authService.supabaseClient }
+    private var supabase: SupabaseClient { authService.supabase }
     
     @Published var isLoading = false
-    @Published var events: [UserEvent] = []
-    @Published var analytics: EventAnalytics?
+    @Published var events: [Event] = []
     @Published var errorMessage: String?
     
     private init() {}
     
-    // MARK: - Event Tracking
+    // MARK: - Event Creation
     
-    func trackEvent(_ event: UserEvent) async {
-        do {
-            try event.validate()
-            
-            // Store event in Supabase
-            try await storeEvent(event)
-            
-            // Update local events array
-            events.append(event)
-            
-            // Update analytics
-            updateAnalytics()
-            
-        } catch {
-            print("Failed to track event: \(error)")
-            errorMessage = "Failed to track event: \(error.localizedDescription)"
+    func createEvent(_ request: EventCreationRequest) async throws -> Event {
+        guard let currentUser = authService.currentUser else {
+            throw EventError.userNotAuthenticated
         }
-    }
-    
-    func trackEvent(
-        userId: UUID,
-        eventType: EventType,
-        eventData: [String: String]? = nil,
-        metadata: EventMetadata? = nil
-    ) async {
-        let event = UserEvent(
-            userId: userId,
-            eventType: eventType,
-            eventData: eventData,
-            metadata: metadata ?? EventMetadata()
+        
+        let event = Event(
+            hostId: UUID(uuidString: currentUser.id) ?? UUID(),
+            title: request.title,
+            description: request.description,
+            imageUrl: request.imageUrl,
+            tags: request.tags,
+            location: request.location,
+            startTime: request.startTime,
+            endTime: request.endTime,
+            isPublic: request.isPublic,
+            capacity: request.capacity,
+            price: request.price
         )
         
-        await trackEvent(event)
-    }
-    
-    // MARK: - Event Storage
-    
-    private func storeEvent(_ event: UserEvent) async throws {
         let eventRecord = EventRecord(
             id: event.id.uuidString,
-            userId: event.userId.uuidString,
-            eventType: event.eventType.rawValue,
-            eventData: event.eventData,
+            hostId: event.hostId.uuidString,
+            title: event.title,
+            description: event.description,
+            imageUrl: event.imageUrl,
+            tags: event.tags,
+            location: event.location,
+            startTime: ISO8601DateFormatter().string(from: event.startTime),
+            endTime: ISO8601DateFormatter().string(from: event.endTime),
+            isPublic: event.isPublic,
+            capacity: event.capacity,
+            price: event.price,
             createdAt: ISO8601DateFormatter().string(from: event.createdAt),
-            metadata: encodeEventMetadata(event.metadata)
+            updatedAt: ISO8601DateFormatter().string(from: event.updatedAt)
         )
         
         try await supabase
-            .from("user_events")
+            .from("events")
             .insert(eventRecord)
+            .execute()
+        
+        return event
+    }
+    
+    // MARK: - Sample Event Creation (for testing)
+    
+    func createSampleEvents() async throws {
+        guard let currentUser = authService.currentUser else {
+            throw EventError.userNotAuthenticated
+        }
+        
+        let now = Date()
+        let userId = UUID(uuidString: currentUser.id) ?? UUID()
+        
+        let sampleEvents = [
+            EventCreationRequest(
+                hostId: userId,
+                title: "Weekend Beach Party",
+                description: "Join us for an amazing beach party with live music, food, and drinks!",
+                imageUrl: nil,
+                tags: ["Beach", "Music", "Party"],
+                location: "Santa Monica Beach",
+                startTime: now.addingTimeInterval(86400), // Tomorrow
+                endTime: now.addingTimeInterval(90000),
+                isPublic: true,
+                capacity: 100,
+                price: 25.0
+            ),
+            EventCreationRequest(
+                hostId: userId,
+                title: "Tech Meetup LA",
+                description: "Network with fellow developers and tech enthusiasts in Los Angeles!",
+                imageUrl: nil,
+                tags: ["Tech", "Networking", "Professional"],
+                location: "Downtown LA",
+                startTime: now.addingTimeInterval(172800), // Day after tomorrow
+                endTime: now.addingTimeInterval(176400),
+                isPublic: true,
+                capacity: 50,
+                price: 15.0
+            ),
+            EventCreationRequest(
+                hostId: userId,
+                title: "Sunset Yoga Session",
+                description: "Relaxing yoga session with beautiful sunset views",
+                imageUrl: nil,
+                tags: ["Yoga", "Wellness", "Sunset"],
+                location: "Griffith Observatory",
+                startTime: now.addingTimeInterval(259200), // 3 days from now
+                endTime: now.addingTimeInterval(262800),
+                isPublic: true,
+                capacity: 30,
+                price: 20.0
+            )
+        ]
+        
+        for eventRequest in sampleEvents {
+            do {
+                let event = try await createEvent(eventRequest)
+                print("✅ Created sample event: \(event.title)")
+            } catch {
+                print("❌ Failed to create sample event: \(error)")
+            }
+        }
+    }
+    
+    // MARK: - Event Fetching
+    
+    func fetchEventsForHost() async throws -> [Event] {
+        guard let currentUser = authService.currentUser else {
+            throw EventError.userNotAuthenticated
+        }
+        
+        let hostId = currentUser.id
+        
+            let response: [EventResponse] = try await supabase
+            .from("events")
+                .select("*")
+            .eq("host_id", value: hostId)
+            .order("start_time", ascending: true)
+                .execute()
+                .value
+            
+        return response.compactMap { convertToEvent($0) }
+    }
+    
+    func fetchPublicEvents(location: String? = nil) async throws -> [Event] {
+        do {
+            print("🔄 Fetching public events from Supabase...")
+            
+            let response: [EventResponse]
+            
+            if let location = location {
+                response = try await supabase
+                    .from("events")
+                    .select("*")
+                    .eq("is_public", value: true)
+                    .eq("location", value: location)
+                    .order("created_at", ascending: false)
+                    .execute()
+                    .value
+            } else {
+                response = try await supabase
+                    .from("events")
+                    .select("*")
+                    .eq("is_public", value: true)
+                    .order("created_at", ascending: false)
+                    .execute()
+                    .value
+            }
+            
+            print("📅 Raw response count: \(response.count)")
+            
+            let events = response.compactMap { eventResponse -> Event? in
+                let event = convertToEvent(eventResponse)
+                if event == nil {
+                    print("⚠️ Failed to convert event: \(eventResponse.title)")
+                }
+                return event
+            }
+            
+            print("✅ Successfully converted \(events.count) events")
+            return events
+            
+        } catch {
+            print("❌ Error fetching events: \(error)")
+            print("🔍 Error details: \(error.localizedDescription)")
+            
+            // Check if it's a decoding error
+            if error.localizedDescription.contains("data couldn't be read") {
+                print("🔍 This appears to be a decoding error. Checking response structure...")
+                throw EventError.databaseError
+            }
+            
+            throw error
+        }
+    }
+    
+    func fetchEvent(by id: UUID) async throws -> Event? {
+            let response: [EventResponse] = try await supabase
+            .from("events")
+                .select("*")
+            .eq("id", value: id.uuidString)
+            .limit(1)
+                .execute()
+                .value
+            
+        return response.first.flatMap { convertToEvent($0) }
+    }
+    
+    // MARK: - Event Updates
+    
+    func updateEvent(_ id: UUID, with request: EventUpdateRequest) async throws -> Event {
+        var updateData = EventUpdateData()
+        
+        if let title = request.title { updateData.title = title }
+        if let description = request.description { updateData.description = description }
+        if let imageUrl = request.imageUrl { updateData.imageUrl = imageUrl }
+        if let tags = request.tags { updateData.tags = tags }
+        if let location = request.location { updateData.location = location }
+        if let startTime = request.startTime { updateData.startTime = ISO8601DateFormatter().string(from: startTime) }
+        if let endTime = request.endTime { updateData.endTime = ISO8601DateFormatter().string(from: endTime) }
+        if let isPublic = request.isPublic { updateData.isPublic = isPublic }
+        if let capacity = request.capacity { updateData.capacity = capacity }
+        if let price = request.price { updateData.price = price }
+        
+        updateData.updatedAt = ISO8601DateFormatter().string(from: Date())
+        
+        try await supabase
+            .from("events")
+            .update(updateData)
+            .eq("id", value: id.uuidString)
+            .execute()
+        
+        return try await fetchEvent(by: id) ?? Event(
+            hostId: UUID(),
+            title: "",
+            description: "",
+            location: "",
+            startTime: Date(),
+            endTime: Date()
+        )
+    }
+    
+    func deleteEvent(_ id: UUID) async throws {
+        try await supabase
+            .from("events")
+            .delete()
+            .eq("id", value: id.uuidString)
             .execute()
     }
     
-    private func encodeEventMetadata(_ metadata: EventMetadata?) -> [String: String] {
-        guard let metadata = metadata else { return [:] }
-        
-        return [
-            "source": metadata.source ?? "unknown",
-            "version": metadata.version ?? "unknown",
-            "platform": metadata.platform ?? "unknown",
-            "device_model": metadata.deviceModel ?? "unknown"
-        ]
-    }
+    // MARK: - Helper Methods
     
-    // MARK: - Event Retrieval
-    
-    func loadEvents(for userId: UUID, limit: Int = 100) async throws {
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            let response: [EventResponse] = try await supabase
-                .from("user_events")
-                .select("*")
-                .eq("user_id", value: userId.uuidString)
-                .order("created_at", ascending: false)
-                .limit(limit)
-                .execute()
-                .value
-            
-            events = response.compactMap { convertToUserEvent($0) }
-            updateAnalytics()
-            
-        } catch {
-            errorMessage = "Failed to load events: \(error.localizedDescription)"
-            throw EventError.loadFailed(error.localizedDescription)
-        }
-        
-        isLoading = false
-    }
-    
-    func loadEventsByType(_ eventType: EventType, for userId: UUID, limit: Int = 50) async throws -> [UserEvent] {
-        do {
-            let response: [EventResponse] = try await supabase
-                .from("user_events")
-                .select("*")
-                .eq("user_id", value: userId.uuidString)
-                .eq("event_type", value: eventType.rawValue)
-                .order("created_at", ascending: false)
-                .limit(limit)
-                .execute()
-                .value
-            
-            return response.compactMap { convertToUserEvent($0) }
-            
-        } catch {
-            throw EventError.loadFailed("Failed to load events by type: \(error.localizedDescription)")
-        }
-    }
-    
-    func loadEventsByCategory(_ category: EventCategory, for userId: UUID, limit: Int = 50) async throws -> [UserEvent] {
-        let categoryTypes = EventType.allCases.filter { $0.category == category }
-        let typeValues = categoryTypes.map { $0.rawValue }
-        
-        do {
-            let response: [EventResponse] = try await supabase
-                .from("user_events")
-                .select("*")
-                .eq("user_id", value: userId.uuidString)
-                .in("event_type", values: typeValues)
-                .order("created_at", ascending: false)
-                .limit(limit)
-                .execute()
-                .value
-            
-            return response.compactMap { convertToUserEvent($0) }
-            
-        } catch {
-            throw EventError.loadFailed("Failed to load events by category: \(error.localizedDescription)")
-        }
-    }
-    
-    func loadRecentEvents(for userId: UUID, days: Int = 7) async throws -> [UserEvent] {
-        let calendar = Calendar.current
-        let startDate = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        let startDateString = ISO8601DateFormatter().string(from: startDate)
-        
-        do {
-            let response: [EventResponse] = try await supabase
-                .from("user_events")
-                .select("*")
-                .eq("user_id", value: userId.uuidString)
-                .gte("created_at", value: startDateString)
-                .order("created_at", ascending: false)
-                .execute()
-                .value
-            
-            return response.compactMap { convertToUserEvent($0) }
-            
-        } catch {
-            throw EventError.loadFailed("Failed to load recent events: \(error.localizedDescription)")
-        }
-    }
-    
-    // MARK: - Analytics
-    
-    private func updateAnalytics() {
-        analytics = EventAnalytics(events: events)
-    }
-    
-    func generateAnalytics(for userId: UUID) async throws -> EventAnalytics {
-        try await loadEvents(for: userId)
-        return EventAnalytics(events: events)
-    }
-    
-    func getEventStats(for userId: UUID) async throws -> EventStats {
-        let totalEvents = events.count
-        let profileEvents = events.filter { $0.eventType.category == .profile }.count
-        let socialEvents = events.filter { $0.eventType.category == .social }.count
-        let authEvents = events.filter { $0.eventType.category == .authentication }.count
-        
-        let lastEventDate = events.first?.createdAt
-        let firstEventDate = events.last?.createdAt
-        
-        return EventStats(
-            totalEvents: totalEvents,
-            profileEvents: profileEvents,
-            socialEvents: socialEvents,
-            authenticationEvents: authEvents,
-            lastEventDate: lastEventDate,
-            firstEventDate: firstEventDate
-        )
-    }
-    
-    // MARK: - Event Groups for UI
-    
-    func groupEventsByDate(_ events: [UserEvent]) -> [EventGroup] {
-        let calendar = Calendar.current
-        let groupedEvents = Dictionary(grouping: events) { event in
-            calendar.startOfDay(for: event.createdAt)
-        }
-        
-        return groupedEvents.map { date, events in
-            EventGroup(date: date, events: events.sorted { $0.createdAt > $1.createdAt })
-        }.sorted { $0.date > $1.date }
-    }
-    
-    // MARK: - Profile Event Tracking Helpers
-    
-    func trackProfileCreation(_ profileData: ProfileData, userId: UUID) async {
-        let event = UserEvent.profileCreated(userId: userId, profileData: profileData)
-        await trackEvent(event)
-    }
-    
-    func trackProfileUpdate(userId: UUID, changes: [String: Any]) async {
-        let event = UserEvent.profileUpdated(userId: userId, changes: changes)
-        await trackEvent(event)
-    }
-    
-    func trackAvatarUpload(userId: UUID, avatarURL: String) async {
-        let event = UserEvent.avatarUploaded(userId: userId, avatarURL: avatarURL)
-        await trackEvent(event)
-    }
-    
-    func trackVibeTagsUpdate(userId: UUID, oldTags: [VibeTag], newTags: [VibeTag]) async {
-        let event = UserEvent.vibeTagsUpdated(userId: userId, oldTags: oldTags, newTags: newTags)
-        await trackEvent(event)
-    }
-    
-    func trackBioUpdate(userId: UUID, oldBio: String, newBio: String) async {
-        let event = UserEvent.bioUpdated(userId: userId, oldBio: oldBio, newBio: newBio)
-        await trackEvent(event)
-    }
-    
-    func trackUserAuthentication(userId: UUID, method: String) async {
-        let event = UserEvent.userAuthenticated(userId: userId, method: method)
-        await trackEvent(event)
-    }
-    
-    // MARK: - Utility Methods
-    
-    private func convertToUserEvent(_ response: EventResponse) -> UserEvent? {
+    private func convertToEvent(_ response: EventResponse) -> Event? {
         guard let id = UUID(uuidString: response.id),
-              let userId = UUID(uuidString: response.userId),
-              let eventType = EventType(rawValue: response.eventType),
-              let createdAt = ISO8601DateFormatter().date(from: response.createdAt) else {
+              let hostId = UUID(uuidString: response.hostId),
+              let startTime = ISO8601DateFormatter().date(from: response.startTime),
+              let endTime = ISO8601DateFormatter().date(from: response.endTime),
+              let createdAt = ISO8601DateFormatter().date(from: response.createdAt),
+              let updatedAt = ISO8601DateFormatter().date(from: response.updatedAt) else {
             return nil
         }
         
-        let metadata = convertToEventMetadata(response.metadata)
-        
-        return UserEvent(
+        return Event(
             id: id,
-            userId: userId,
-            eventType: eventType,
-            eventData: response.eventData,
-            metadata: metadata
+            hostId: hostId,
+            title: response.title,
+            description: response.description,
+            imageUrl: response.imageUrl,
+            tags: response.tags ?? [], // Handle null tags
+            location: response.location,
+            startTime: startTime,
+            endTime: endTime,
+            isPublic: response.isPublic,
+            capacity: response.capacity,
+            price: response.price,
+            createdAt: createdAt,
+            updatedAt: updatedAt
         )
-    }
-    
-    private func convertToEventMetadata(_ metadataDict: [String: String]?) -> EventMetadata? {
-        guard let dict = metadataDict else { return nil }
-        
-        return EventMetadata(
-            source: dict["source"],
-            version: dict["version"],
-            platform: dict["platform"],
-            deviceModel: dict["device_model"]
-        )
-    }
-    
-    func clearLocalCache() {
-        events.removeAll()
-        analytics = nil
-        errorMessage = nil
     }
 }
 
-// MARK: - Response Models
+// MARK: - Database Models
 
-struct EventRecord: Codable {
+private struct EventUpdateData: Codable {
+    var title: String?
+    var description: String?
+    var imageUrl: String?
+    var tags: [String]?
+    var location: String?
+    var startTime: String?
+    var endTime: String?
+    var isPublic: Bool?
+    var capacity: Int?
+    var price: Double?
+    var updatedAt: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case title, description, tags, location, capacity, price
+        case imageUrl = "image_url"
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case isPublic = "is_public"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct EventRecord: Codable {
     let id: String
-    let userId: String
-    let eventType: String
-    let eventData: [String: String]?
+    let hostId: String
+    let title: String
+    let description: String
+    let imageUrl: String?
+    let tags: [String]
+    let location: String
+    let startTime: String
+    let endTime: String
+    let isPublic: Bool
+    let capacity: Int?
+    let price: Double?
     let createdAt: String
-    let metadata: [String: String]?
+    let updatedAt: String
+}
+
+private struct EventResponse: Codable {
+    let id: String
+    let hostId: String
+    let title: String
+    let description: String
+    let imageUrl: String?
+    let tags: [String]?
+    let location: String
+    let startTime: String
+    let endTime: String
+    let isPublic: Bool
+    let capacity: Int?
+    let price: Double?
+    let createdAt: String
+    let updatedAt: String
     
     enum CodingKeys: String, CodingKey {
         case id
-        case userId = "user_id"
-        case eventType = "event_type"
-        case eventData = "event_data"
+        case hostId = "host_id"
+        case title
+        case description
+        case imageUrl = "image_url"
+        case tags
+        case location
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case isPublic = "is_public"
+        case capacity
+        case price
         case createdAt = "created_at"
-        case metadata
+        case updatedAt = "updated_at"
     }
 }
 
-struct EventResponse: Codable {
-    let id: String
-    let userId: String
-    let eventType: String
-    let eventData: [String: String]?
-    let createdAt: String
-    let metadata: [String: String]?
-    
-    enum CodingKeys: String, CodingKey {
-        case id
-        case userId = "user_id"
-        case eventType = "event_type"
-        case eventData = "event_data"
-        case createdAt = "created_at"
-        case metadata
-    }
-}
-
-// MARK: - Analytics Models
-
-struct EventStats {
-    let totalEvents: Int
-    let profileEvents: Int
-    let socialEvents: Int
-    let authenticationEvents: Int
-    let lastEventDate: Date?
-    let firstEventDate: Date?
-    
-    var mostActiveCategory: EventCategory? {
-        let categoryScores = [
-            (EventCategory.profile, profileEvents),
-            (EventCategory.social, socialEvents),
-            (EventCategory.authentication, authenticationEvents)
-        ]
-        
-        return categoryScores.max(by: { $0.1 < $1.1 })?.0
-    }
-    
-    var averageEventsPerDay: Double {
-        guard let firstDate = firstEventDate,
-              let lastDate = lastEventDate else { return 0 }
-        
-        let daysBetween = Calendar.current.dateComponents([.day], from: firstDate, to: lastDate).day ?? 1
-        return Double(totalEvents) / Double(max(daysBetween, 1))
-    }
-}
-
-// MARK: - Error Types
+// MARK: - Event Errors
 
 enum EventError: LocalizedError {
-    case trackingFailed(String)
-    case loadFailed(String)
-    case invalidEventData(String)
-    case storageError(String)
+    case userNotAuthenticated
+    case eventNotFound
+    case invalidEventData
+    case networkError
+    case databaseError
     
     var errorDescription: String? {
         switch self {
-        case .trackingFailed(let message):
-            return "Event tracking failed: \(message)"
-        case .loadFailed(let message):
-            return "Failed to load events: \(message)"
-        case .invalidEventData(let message):
-            return "Invalid event data: \(message)"
-        case .storageError(let message):
-            return "Storage error: \(message)"
+        case .userNotAuthenticated:
+            return "User must be authenticated to perform this action"
+        case .eventNotFound:
+            return "Event not found"
+        case .invalidEventData:
+            return "Invalid event data provided"
+        case .networkError:
+            return "Network error occurred"
+        case .databaseError:
+            return "Database error occurred"
         }
     }
 } 

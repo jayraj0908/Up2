@@ -27,7 +27,7 @@ struct EmailInputField: View {
                     RoundedRectangle(cornerRadius: Up2Spacing.sm)
                         .stroke(borderColor, lineWidth: 1)
                 )
-                .onChange(of: email) { newValue in
+                .onChange(of: email) { _, newValue in
                     // Validate email as user types
                     validateEmail()
                 }

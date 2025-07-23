@@ -39,7 +39,10 @@ final class SplashViewModel: ObservableObject {
     
     // MARK: - Initialization
     init(initializationService: AppInitializationService? = nil) {
-        self.initializationService = initializationService ?? AppInitializationService()
+        self.initializationService = initializationService ?? AppInitializationService(
+            authService: SupabaseAuthService.shared,
+            appStateManager: AppStateManager()
+        )
         setupObservers()
     }
     
@@ -126,12 +129,16 @@ final class SplashViewModel: ObservableObject {
             }
             
             let step = animationSteps[currentStep]
-            self.performAnimationStep(step)
+            Task { @MainActor in
+                self.performAnimationStep(step)
+            }
             currentStep += 1
             
             if currentStep >= animationSteps.count {
                 timer.invalidate()
-                self.animationState = .completed
+                Task { @MainActor in
+                    self.animationState = .completed
+                }
             }
         }
     }
@@ -171,13 +178,17 @@ final class SplashViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(remainingTime * 1_000_000_000))
             }
             
-            await handleInitializationResult(result)
+            await MainActor.run {
+                handleInitializationResult(result)
+            }
         }
     }
     
     private func performRetryInitialization() async {
         let result = await initializationService.retryInitialization()
-        await handleInitializationResult(result)
+        await MainActor.run {
+            handleInitializationResult(result)
+        }
         isRetrying = false
     }
     
@@ -231,16 +242,18 @@ final class SplashViewModel: ObservableObject {
     // MARK: - Progress Animation
     private func startProgressAnimation() {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
-            guard let self = self, self.initializationState.isLoading else {
-                timer.invalidate()
-                return
-            }
-            
-            // Smooth progress animation
-            let targetProgress = self.initializationState.progress
-            if self.progress < targetProgress {
-                withAnimation(.linear(duration: 0.1)) {
-                    self.progress = min(self.progress + 0.05, targetProgress)
+            Task { @MainActor in
+                guard let self = self, self.initializationState.isLoading else {
+                    timer.invalidate()
+                    return
+                }
+                
+                // Smooth progress animation
+                let targetProgress = self.initializationState.progress
+                if self.progress < targetProgress {
+                    withAnimation(.linear(duration: 0.1)) {
+                        self.progress = min(self.progress + 0.05, targetProgress)
+                    }
                 }
             }
         }

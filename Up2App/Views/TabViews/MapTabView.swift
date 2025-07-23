@@ -14,22 +14,20 @@ struct MapTabView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.1, longitudeDelta: 0.1)
     ))
     @State private var selectedEvent: MapEvent?
+    @State private var selectedEventForDetail: EventFeedItem?
     @State private var mapStyle: MapKit.MapStyle = .standard
     @State private var showingMapStyle = false
     @State private var showingLocationAlert = false
+    @State private var mapEvents: [MapEvent] = []
+    @State private var errorMessage: String?
     
-    // MARK: - Mock Data
-    private let mockEvents: [MapEvent] = [
-        MapEvent(id: "1", title: "Rooftop Party", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194)),
-        MapEvent(id: "2", title: "Art Gallery Opening", coordinate: CLLocationCoordinate2D(latitude: 37.7649, longitude: -122.4094)),
-        MapEvent(id: "3", title: "Food Truck Rally", coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4094)),
-        MapEvent(id: "4", title: "Tech Meetup", coordinate: CLLocationCoordinate2D(latitude: 37.7849, longitude: -122.4294))
-    ]
+    // MARK: - Services
+    private let mapService = MapService.shared
     
     // MARK: - Map View
     private var mapView: some View {
         Map(position: $position) {
-            ForEach(mockEvents) { event in
+            ForEach(mapEvents) { event in
                 Annotation(event.title, coordinate: event.coordinate) {
                     CustomEventMapPin(event: event, isSelected: selectedEvent?.id == event.id)
                         .onTapGesture {
@@ -48,17 +46,8 @@ struct MapTabView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                // Background - Consistent with host onboarding theme
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black,
-                        Color(red: 0.1, green: 0.0, blue: 0.3),
-                        Color(red: 0.3, green: 0.0, blue: 0.4)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Liquid Glass Background
+                Up2LiquidGlassBackground()
                 
                 // Real Map View
                 mapView
@@ -85,9 +74,18 @@ struct MapTabView: View {
             } message: {
                 Text("Location access will be implemented in the next update.")
             }
-        }
-        .onAppear {
-            requestLocationPermissionIfNeeded()
+            .sheet(item: $selectedEventForDetail) { item in
+                EventDetailView(
+                    event: item.event,
+                    host: item.host
+                )
+            }
+            .onAppear {
+                loadMapEvents()
+            }
+            .refreshable {
+                await refreshMapEvents()
+            }
         }
     }
     
@@ -171,7 +169,7 @@ struct MapTabView: View {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundColor(.orange)
                     
-                    Text("\(mockEvents.count) events nearby")
+                    Text("\(mapEvents.count) events nearby")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(.white.opacity(0.9))
@@ -265,9 +263,11 @@ struct MapTabView: View {
             // Action buttons
             HStack(spacing: 12) {
                 Button("View Event Details") {
-                    // Navigate to the same EventDetailView as home feed
-                    navigationCoordinator.navigate(to: .eventDetail(eventId: event.id))
-                    selectedEvent = nil
+                    // Convert MapEvent to EventFeedItem and show EventDetailView
+                    if let eventFeedItem = convertMapEventToFeedItem(event) {
+                        selectedEventForDetail = eventFeedItem
+                        selectedEvent = nil
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -298,7 +298,7 @@ struct MapTabView: View {
     // MARK: - Helper Methods
     private func centerOnUserLocation() {
         // This would integrate with Core Location in a real implementation
-        showingLocationAlert = true
+        print("📍 Centering on user location")
     }
     
     private func requestLocationPermissionIfNeeded() {
@@ -307,10 +307,71 @@ struct MapTabView: View {
     }
     
     private func openInMaps(event: MapEvent) {
-        let placemark = MKPlacemark(coordinate: event.coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
+        let coordinate = event.coordinate
+        let mapItem = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
         mapItem.name = event.title
-        mapItem.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+        mapItem.openInMaps(launchOptions: nil)
+    }
+    
+    private func loadMapEvents() {
+        Task {
+            do {
+                mapEvents = try await mapService.fetchMapEvents()
+            } catch {
+                errorMessage = "Failed to load events: \(error.localizedDescription)"
+                print("Error loading events: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func refreshMapEvents() async {
+        do {
+            mapEvents = try await mapService.fetchMapEvents()
+        } catch {
+            errorMessage = "Failed to refresh events: \(error.localizedDescription)"
+            print("Error refreshing events: \(error.localizedDescription)")
+        }
+    }
+
+    private func convertMapEventToFeedItem(_ mapEvent: MapEvent) -> EventFeedItem? {
+        // Convert MapEvent to Event with basic information
+        let event = Event(
+            id: UUID(uuidString: mapEvent.id) ?? UUID(),
+            hostId: UUID(), // Placeholder host ID
+            title: mapEvent.title,
+            description: "Event details will be loaded when you view the full event.",
+            imageUrl: nil,
+            tags: [], // Empty tags for now
+            location: "Location details available in full event view",
+            startTime: Date().addingTimeInterval(86400), // Tomorrow
+            endTime: Date().addingTimeInterval(90000), // Tomorrow + 1 hour
+            isPublic: true,
+            capacity: nil,
+            price: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        
+        // Create a basic host (you might want to fetch the real host data)
+        let host = EventHost(
+            id: UUID(), // Placeholder host ID
+            name: "Event Host",
+            handle: "@eventhost",
+            avatarUrl: nil,
+            vibeTags: [],
+            isVerified: false
+        )
+        
+        return EventFeedItem(
+            id: event.id,
+            event: event,
+            host: host,
+            score: 0.5,
+            attendeeCount: 0,
+            friendsAttending: [],
+            isBookmarked: false,
+            distanceFromUser: nil
+        )
     }
 }
 
@@ -373,20 +434,6 @@ struct Triangle: Shape {
 }
 
 // MARK: - Supporting Types
-
-struct MapEvent: Identifiable, Hashable, Equatable {
-    let id: String
-    let title: String
-    let coordinate: CLLocationCoordinate2D
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: MapEvent, rhs: MapEvent) -> Bool {
-        return lhs.id == rhs.id
-    }
-}
 
 
 

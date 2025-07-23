@@ -290,7 +290,7 @@ struct CompletionStepView: View {
     
     private func handleProfileCompletion() {
         // Mark profile setup as complete and navigate to main app
-        appStateManager.handleProfileSetupComplete()
+        appStateManager.completeOnboarding()
     }
 }
 
@@ -348,12 +348,12 @@ struct ProfileNavigationButtons: View {
     
     private func handleProfileCompletion() {
         // Mark profile setup as complete and navigate to main app
-        appStateManager.handleProfileSetupComplete()
+        appStateManager.completeOnboarding()
         isPresented = false
     }
 }
 
 #Preview {
     ProfileSetupView(isPresented: .constant(true))
-        .environmentObject(AppStateManager.shared)
+        .environmentObject(AppStateManager())
 } 

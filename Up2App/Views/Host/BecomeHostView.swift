@@ -5,6 +5,12 @@ struct BecomeHostView: View {
     @EnvironmentObject var appStateManager: AppStateManager
     @State private var currentStep = 0
     @State private var showingHostDashboard = false
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+    
+    // Services
+    private let profileService = ProfileService.shared
+    private let authService = SupabaseAuthService.shared
     
     // Host application data
     @State private var businessName = ""
@@ -281,35 +287,55 @@ struct BecomeHostView: View {
     
     // MARK: - Navigation Buttons
     private var navigationButtons: some View {
-        HStack(spacing: 16) {
-            if currentStep > 0 {
-                Button("Back") {
-                    withAnimation {
-                        currentStep -= 1
+        VStack(spacing: 12) {
+            // Error message
+            if let errorMessage = errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 20)
+            }
+            
+            HStack(spacing: 16) {
+                if currentStep > 0 {
+                    Button("Back") {
+                        withAnimation {
+                            currentStep -= 1
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white.opacity(0.2))
+                    .cornerRadius(12)
+                    .disabled(isSubmitting)
+                }
+                
+                Button(currentStep == 4 ? "Submit Application" : "Continue") {
+                    if currentStep == 4 {
+                        submitApplication()
+                    } else {
+                        withAnimation {
+                            currentStep += 1
+                        }
                     }
                 }
                 .foregroundColor(.white)
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.white.opacity(0.2))
+                .background(Color.blue)
                 .cornerRadius(12)
-            }
-            
-            Button(currentStep == 4 ? "Submit Application" : "Continue") {
-                if currentStep == 4 {
-                    submitApplication()
-                } else {
-                    withAnimation {
-                        currentStep += 1
+                .disabled(!canProceed || isSubmitting)
+                .overlay(
+                    Group {
+                        if isSubmitting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        }
                     }
-                }
+                )
             }
-            .foregroundColor(.white)
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.blue)
-            .cornerRadius(12)
-            .disabled(!canProceed)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
@@ -335,16 +361,47 @@ struct BecomeHostView: View {
     
     // MARK: - Helper Methods
     private func submitApplication() {
-        // Simulate application submission
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            // Update user to be a host
-            if var currentUser = appStateManager.currentUser {
-                currentUser.isHost = true
-                appStateManager.setCurrentUser(currentUser)
+        guard let currentUser = authService.currentUser else {
+            errorMessage = "User not authenticated"
+            return
+        }
+        
+        isSubmitting = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                print("🔄 Starting host onboarding for user: \(currentUser.id)")
+                
+                let userId = UUID(uuidString: currentUser.id) ?? UUID()
+                
+                // Update profile to become a host (ProfileService will create profile if needed)
+                print("🔄 Updating profile to host status...")
+                _ = try await profileService.updateProfileToHost(userId: userId)
+                print("✅ Profile updated to host successfully")
+                
+                // Update app state with new host status
+                await MainActor.run {
+                    // The host status is now managed through the profile system
+                    // Update the soft gate state to reflect completion
+                    appStateManager.updateSoftGateState(.complete)
+                    
+                    isSubmitting = false
+                    showingHostDashboard = true
+                    
+                    // Dismiss the onboarding view
+                    presentationMode.wrappedValue.dismiss()
+                }
+                
+                print("✅ Host onboarding completed successfully")
+                
+            } catch {
+                print("❌ Host onboarding failed: \(error)")
+                await MainActor.run {
+                    isSubmitting = false
+                    errorMessage = "Failed to submit application: \(error.localizedDescription)"
+                }
             }
-            
-            showingHostDashboard = true
-            presentationMode.wrappedValue.dismiss()
         }
     }
 }
@@ -435,5 +492,5 @@ struct ReviewRow: View {
 
 #Preview {
     BecomeHostView()
-        .environmentObject(AppStateManager.shared)
+        .environmentObject(AppStateManager())
 } 

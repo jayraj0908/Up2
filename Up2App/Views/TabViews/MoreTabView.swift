@@ -12,34 +12,99 @@ struct MoreTabView: View {
     @State private var showingDebug = false
     @State private var showingHostDashboard = false
     @State private var showingBecomeHost = false
+    @State private var showingLoginSheet = false
+    
+    // MARK: - Soft Gate Overlay
+    private var softGateOverlay: some View {
+        VStack {
+            Spacer()
+            
+            VStack(spacing: Up2Spacing.lg) {
+                // Lock Icon
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(Up2Colors.accent)
+                
+                // Message
+                VStack(spacing: Up2Spacing.sm) {
+                    Text("Sign In to Access More Features")
+                        .font(Up2Typography.heading2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Up2Colors.textInverse)
+                    
+                    Text("Create an account or sign in to access host tools, settings, and additional features.")
+                        .font(Up2Typography.bodySmall)
+                        .foregroundColor(Up2Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Up2Spacing.xl)
+                }
+                
+                // Action Buttons
+                VStack(spacing: Up2Spacing.md) {
+                    Up2Button("Sign In", style: .primary) {
+                        showingLoginSheet = true
+                    }
+                    
+                    Up2Button("Continue Browsing", style: .secondary) {
+                        // Dismiss overlay - user can continue browsing
+                    }
+                }
+            }
+            .padding(Up2Spacing.xl)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Up2Colors.primary.opacity(0.3), Up2Colors.accent.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .padding(.horizontal, Up2Spacing.lg)
+            
+            Spacer()
+        }
+        .background(
+            Rectangle()
+                .fill(.black.opacity(0.3))
+                .ignoresSafeArea()
+        )
+    }
     
     // MARK: - Body
     var body: some View {
         NavigationView {
             ZStack {
-                // Background - Consistent with host onboarding theme
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black,
-                        Color(red: 0.1, green: 0.0, blue: 0.3),
-                        Color(red: 0.3, green: 0.0, blue: 0.4)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Liquid Glass Background
+                Up2LiquidGlassBackground()
                 
                 ScrollView {
                     VStack(spacing: 32) {
-                        // Host Dashboard Section
+                        // Host Dashboard Section (Soft Gated)
                         hostDashboardSection
                         
-                        SettingsPlaceholderView()
-                        HelpSupportPlaceholderView()
-                        AboutPlaceholderView()
-                        DeveloperDebugPlaceholderView()
+                        // Public Features (Always Accessible)
+                        publicFeaturesSection
+                        
+                        // Authenticated Features (Soft Gated)
+                        if appStateManager.isAuthenticated {
+                            authenticatedFeaturesSection
+                        } else {
+                            guestFeaturesSection
+                        }
                     }
                     .padding(.vertical)
+                }
+                
+                // Soft Gate Overlay for Guest Users
+                if !appStateManager.isAuthenticated {
+                    softGateOverlay
                 }
             }
             .navigationBarHidden(true)
@@ -49,6 +114,9 @@ struct MoreTabView: View {
             .sheet(isPresented: $showingBecomeHost) {
                 BecomeHostView()
             }
+            .sheet(isPresented: $showingLoginSheet) {
+                LoginView()
+            }
         }
     }
     
@@ -57,28 +125,189 @@ struct MoreTabView: View {
         VStack(spacing: 16) {
             SectionHeader(title: "Host Tools", icon: "crown")
             
-            // Become a Host option
+            // Become a Host option (Soft Gated)
+            if appStateManager.isAuthenticated {
+                MoreRow(
+                    icon: "plus.circle.fill",
+                    title: "Become a Host",
+                    subtitle: "Start creating and managing events",
+                    color: Color.orange,
+                    badge: "New",
+                    isLocked: false
+                ) {
+                    showingBecomeHost = true
+                }
+                
+                // Host Dashboard (only show if user has completed host onboarding)
+                if appStateManager.softGateState == .complete {
+                    MoreRow(
+                        icon: "chart.bar",
+                        title: "Host Dashboard",
+                        subtitle: "Manage your events and view analytics",
+                        color: Color(red: 0.0, green: 0.48, blue: 1.0),
+                        badge: nil,
+                        isLocked: false
+                    ) {
+                        showingHostDashboard = true
+                    }
+                }
+            } else {
+                // Guest version - show locked
+                MoreRow(
+                    icon: "plus.circle.fill",
+                    title: "Become a Host",
+                    subtitle: "Start creating and managing events",
+                    color: Color.orange,
+                    badge: "New",
+                    isLocked: true
+                ) {
+                    showingLoginSheet = true
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    // MARK: - Public Features Section
+    private var publicFeaturesSection: some View {
+        VStack(spacing: 16) {
+            SectionHeader(title: "App Info", icon: "info.circle")
+            
             MoreRow(
-                icon: "plus.circle.fill",
-                title: "Become a Host",
-                subtitle: "Start creating and managing events",
-                color: Color.orange,
-                badge: "New"
+                icon: "questionmark.circle",
+                title: "Help & Support",
+                subtitle: "Get help and contact us",
+                color: Color.blue,
+                badge: nil,
+                isLocked: false
             ) {
-                showingBecomeHost = true
+                // TODO: Navigate to help
             }
             
-            // Host Dashboard (only show if user is already a host)
-            if appStateManager.currentUser?.isHost == true {
-                MoreRow(
-                    icon: "chart.bar",
-                    title: "Host Dashboard",
-                    subtitle: "Manage your events and view analytics",
-                    color: Color(red: 0.0, green: 0.48, blue: 1.0),
-                    badge: nil
-                ) {
-                    showingHostDashboard = true
-                }
+            MoreRow(
+                icon: "doc.text",
+                title: "Terms of Service",
+                subtitle: "Read our terms and conditions",
+                color: Color.gray,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Navigate to terms
+            }
+            
+            MoreRow(
+                icon: "hand.raised",
+                title: "Privacy Policy",
+                subtitle: "How we protect your data",
+                color: Color.green,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Navigate to privacy
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    // MARK: - Authenticated Features Section
+    private var authenticatedFeaturesSection: some View {
+        VStack(spacing: 16) {
+            SectionHeader(title: "Account", icon: "person.circle")
+            
+            MoreRow(
+                icon: "gearshape",
+                title: "Settings",
+                subtitle: "Manage your preferences",
+                color: Color.purple,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Navigate to settings
+            }
+            
+            MoreRow(
+                icon: "bell",
+                title: "Notifications",
+                subtitle: "Manage your notifications",
+                color: Color.orange,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Navigate to notifications
+            }
+            
+            MoreRow(
+                icon: "creditcard",
+                title: "Payment Methods",
+                subtitle: "Manage your payment info",
+                color: Color.green,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Navigate to payments
+            }
+            
+            MoreRow(
+                icon: "person.2",
+                title: "Invite Friends",
+                subtitle: "Share Up2 with friends",
+                color: Color.blue,
+                badge: nil,
+                isLocked: false
+            ) {
+                // TODO: Share app
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    // MARK: - Guest Features Section (Soft Gated)
+    private var guestFeaturesSection: some View {
+        VStack(spacing: 16) {
+            SectionHeader(title: "Account", icon: "person.circle")
+            
+            MoreRow(
+                icon: "gearshape",
+                title: "Settings",
+                subtitle: "Manage your preferences",
+                color: Color.purple,
+                badge: nil,
+                isLocked: true
+            ) {
+                showingLoginSheet = true
+            }
+            
+            MoreRow(
+                icon: "bell",
+                title: "Notifications",
+                subtitle: "Manage your notifications",
+                color: Color.orange,
+                badge: nil,
+                isLocked: true
+            ) {
+                showingLoginSheet = true
+            }
+            
+            MoreRow(
+                icon: "creditcard",
+                title: "Payment Methods",
+                subtitle: "Manage your payment info",
+                color: Color.green,
+                badge: nil,
+                isLocked: true
+            ) {
+                showingLoginSheet = true
+            }
+            
+            MoreRow(
+                icon: "person.2",
+                title: "Invite Friends",
+                subtitle: "Share Up2 with friends",
+                color: Color.blue,
+                badge: nil,
+                isLocked: true
+            ) {
+                showingLoginSheet = true
             }
         }
         .padding(.horizontal)
@@ -117,6 +346,7 @@ struct MoreRow: View {
     let subtitle: String
     let color: Color
     let badge: String?
+    let isLocked: Bool
     let action: () -> Void
     
     var body: some View {
@@ -124,18 +354,26 @@ struct MoreRow: View {
             HStack(spacing: 16) {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundColor(color)
+                    .foregroundColor(isLocked ? Color.gray : color)
                     .frame(width: 30)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
+                    HStack {
+                        Text(title)
+                            .font(.headline)
+                            .fontWeight(.medium)
+                            .foregroundColor(isLocked ? Color.gray : .primary)
+                        
+                        if isLocked {
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .foregroundColor(Color.gray)
+                        }
+                    }
                     
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(isLocked ? Color.gray.opacity(0.7) : .secondary)
                 }
                 
                 Spacer()
@@ -153,7 +391,7 @@ struct MoreRow: View {
                 
                 Image(systemName: "chevron.right")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(isLocked ? Color.gray : .secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -161,6 +399,7 @@ struct MoreRow: View {
             .cornerRadius(12)
         }
         .buttonStyle(.plain)
+        .opacity(isLocked ? 0.6 : 1.0)
     }
 }
 
@@ -313,6 +552,8 @@ struct DebugView: View {
             }
         }
     }
+    
+
 }
 
 #Preview {

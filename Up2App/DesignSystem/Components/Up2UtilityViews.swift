@@ -377,6 +377,251 @@ struct Up2EmptyState: View {
     }
 }
 
+// MARK: - Tinder Style Card Gesture View
+struct TinderStyleCardView<Content: View>: View {
+    let content: Content
+    let onSwipeLeft: () -> Void
+    let onSwipeRight: () -> Void
+    let onTap: () -> Void
+    
+    @State private var offset = CGSize.zero
+    @State private var rotation: Double = 0
+    @State private var scale: CGFloat = 1.0
+    
+    init(
+        @ViewBuilder content: () -> Content,
+        onSwipeLeft: @escaping () -> Void = {},
+        onSwipeRight: @escaping () -> Void = {},
+        onTap: @escaping () -> Void = {}
+    ) {
+        self.content = content()
+        self.onSwipeLeft = onSwipeLeft
+        self.onSwipeRight = onSwipeRight
+        self.onTap = onTap
+    }
+    
+    var body: some View {
+        content
+            .offset(offset)
+            .rotationEffect(.degrees(rotation))
+            .scaleEffect(scale)
+            .gesture(
+                DragGesture()
+                    .onChanged { gesture in
+                        offset = gesture.translation
+                        rotation = Double(gesture.translation.width / 20)
+                        scale = 1.0 - abs(gesture.translation.width) / 1000
+                    }
+                    .onEnded { gesture in
+                        let swipeThreshold: CGFloat = 100
+                        
+                        if abs(gesture.translation.width) > swipeThreshold {
+                            // Swipe detected
+                            if gesture.translation.width > 0 {
+                                // Swipe right
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                    offset = CGSize(width: 500, height: 0)
+                                    rotation = 20
+                                    scale = 0.8
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    onSwipeRight()
+                                }
+                            } else {
+                                // Swipe left
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                    offset = CGSize(width: -500, height: 0)
+                                    rotation = -20
+                                    scale = 0.8
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    onSwipeLeft()
+                                }
+                            }
+                        } else {
+                            // Return to center
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                offset = .zero
+                                rotation = 0
+                                scale = 1.0
+                            }
+                        }
+                    }
+            )
+            .onTapGesture {
+                onTap()
+            }
+    }
+}
+
+// MARK: - Sticky Ticket CTA Component
+struct StickyTicketCTA: View {
+    let eventTitle: String
+    let price: String?
+    let onTap: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Get Tickets")
+                        .font(Up2Typography.bodyMedium)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Up2Colors.textOnPrimary)
+                    
+                    if let price = price {
+                        Text("From \(price)")
+                            .font(Up2Typography.captionMedium)
+                            .foregroundColor(Up2Colors.textOnPrimary.opacity(0.8))
+                    }
+                }
+                
+                Spacer()
+                
+                Up2Button(
+                    "Buy Now",
+                    style: .primary,
+                    action: onTap
+                )
+                .frame(width: 100)
+            }
+            .padding(.horizontal, Up2Spacing.lg)
+            .padding(.vertical, Up2Spacing.md)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Rectangle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Up2Colors.primary.opacity(0.3), Up2Colors.accent.opacity(0.1)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+}
+
+// MARK: - Bottom Sheet Popup Component
+struct BottomSheetPopup<Content: View>: View {
+    let title: String
+    let content: Content
+    let onDismiss: () -> Void
+    
+    @State private var offset = CGSize.zero
+    @State private var isPresented = false
+    
+    init(
+        title: String,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.content = content()
+        self.onDismiss = onDismiss
+    }
+    
+    var body: some View {
+        ZStack {
+            // Background overlay
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismissSheet()
+                }
+            
+            VStack(spacing: 0) {
+                Spacer()
+                
+                VStack(spacing: 0) {
+                    // Handle bar
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Color.gray.opacity(0.5))
+                        .frame(width: 36, height: 5)
+                        .padding(.top, Up2Spacing.sm)
+                    
+                    // Header
+                    HStack {
+                        Text(title)
+                            .font(Up2Typography.heading3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(Up2Colors.textPrimary)
+                        
+                        Spacer()
+                        
+                        Button(action: dismissSheet) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(Up2Colors.textSecondary)
+                        }
+                    }
+                    .padding(.horizontal, Up2Spacing.lg)
+                    .padding(.top, Up2Spacing.md)
+                    
+                    // Content
+                    content
+                        .padding(.horizontal, Up2Spacing.lg)
+                        .padding(.vertical, Up2Spacing.md)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [Up2Colors.primary.opacity(0.2), Up2Colors.accent.opacity(0.1)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+                .offset(offset)
+                .gesture(
+                    DragGesture()
+                        .onChanged { gesture in
+                            if gesture.translation.height > 0 {
+                                offset = gesture.translation
+                            }
+                        }
+                        .onEnded { gesture in
+                            if gesture.translation.height > 100 {
+                                dismissSheet()
+                            } else {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                    offset = .zero
+                                }
+                            }
+                        }
+                )
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                isPresented = true
+            }
+        }
+    }
+    
+    private func dismissSheet() {
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+            isPresented = false
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            onDismiss()
+        }
+    }
+}
+
 // MARK: - Convenience Extensions
 
 extension Up2ScreenHeader {

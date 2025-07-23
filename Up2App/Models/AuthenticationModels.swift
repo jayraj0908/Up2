@@ -1,27 +1,19 @@
 import Foundation
 
-// MARK: - Registration Data Models
-struct RegistrationData {
-    var inputMethod: RegistrationInputMethod = .email
-    var emailAddress: String = ""
-    var phoneNumber: String = ""
-    var verificationCode: String = ""
-    var isValid: Bool = false
-}
-
-enum RegistrationInputMethod: CaseIterable {
-    case email
-    case phone
+// MARK: - User Model
+struct User: Codable, Identifiable {
+    let id: String
+    let email: String
+    let fullName: String
     
-    var title: String {
-        switch self {
-        case .email:
-            return "Email"
-        case .phone:
-            return "Phone"
-        }
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case fullName = "full_name"
     }
 }
+
+// MARK: - Authentication Models
 
 // MARK: - Validation Results
 struct ValidationResult {
@@ -34,43 +26,41 @@ struct ValidationResult {
     }
 }
 
-// MARK: - Registration States
-enum RegistrationState: Equatable {
-    case inputCredentials
-    case awaitingVerification
-    case verifying
-    case completed
-    case error(String)
+// MARK: - Registration Data Models
+struct RegistrationData {
+    var emailAddress: String = ""
+    var password: String = ""
+    var confirmPassword: String = ""
+    var isValid: Bool = false
 }
 
 // MARK: - Login Data Models
 struct LoginData {
-    var inputMethod: LoginInputMethod = .email
     var emailAddress: String = ""
-    var phoneNumber: String = ""
-    var verificationCode: String = ""
+    var password: String = ""
     var isValid: Bool = false
 }
 
-enum LoginInputMethod: CaseIterable {
-    case email
-    case phone
-    
-    var title: String {
-        switch self {
-        case .email:
-            return "Email"
-        case .phone:
-            return "Phone"
-        }
-    }
-}
-
-// MARK: - Login States
-enum LoginState: Equatable {
+// MARK: - Authentication States
+enum LoginState {
     case inputCredentials
-    case awaitingVerification
-    case verifying
     case completed
     case error(String)
+}
+
+enum RegistrationState {
+    case inputCredentials
+    case completed
+    case error(String)
+}
+
+// MARK: - Input Methods (Legacy - kept for compatibility)
+enum LoginInputMethod {
+    case email
+    case phone
+}
+
+enum RegistrationInputMethod {
+    case email
+    case phone
 } 

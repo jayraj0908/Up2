@@ -32,12 +32,12 @@ struct PaymentConfirmationView: View {
                             .font(.headline)
                             .multilineTextAlignment(.center)
                         
-                        Text("Ticket Price: $\(event.ticketPrice, specifier: "%.2f")")
+                        Text("Ticket Price: $\(event.price ?? 0.0, specifier: "%.2f")")
                             .font(.title3)
                             .fontWeight(.semibold)
                             .foregroundColor(.green)
                         
-                        Text("Date: \(event.date, style: .date)")
+                        Text("Date: \(event.startTime, style: .date)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }

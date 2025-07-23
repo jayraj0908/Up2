@@ -5,10 +5,10 @@ struct HostDashboardView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTab = 0
     @State private var showingEventAnalytics = false
-    @State private var selectedEventForAnalytics: HostEvent?
+    @State private var selectedEventForAnalytics: Event?
     @State private var showingCreateEvent = false
-    @State private var showingEventRSVP: HostEvent?
-    @State private var showingEventEdit: HostEvent?
+    @State private var showingEventRSVP: Event?
+    @State private var showingEventEdit: Event?
     
     var body: some View {
         NavigationView {
@@ -55,7 +55,16 @@ struct HostDashboardView: View {
             }
             .sheet(isPresented: $showingEventAnalytics) {
                 if let event = selectedEventForAnalytics {
-                    EventAnalyticsView(event: event)
+                    EventAnalyticsView(event: HostEvent(
+                        id: event.id,
+                        title: event.title,
+                        venueName: event.location,
+                        date: event.startTime,
+                        rsvpCount: 0,
+                        price: event.price ?? 0.0,
+                        status: .upcoming,
+                        imageURL: event.imageUrl
+                    ))
                 }
             }
             .sheet(isPresented: $showingCreateEvent) {
@@ -71,7 +80,16 @@ struct HostDashboardView: View {
                 EventRSVPView(event: event)
             }
             .sheet(item: $showingEventEdit) { event in
-                EventEditView(event: event)
+                EventEditView(event: HostEvent(
+                    id: event.id,
+                    title: event.title,
+                    venueName: event.location,
+                    date: event.startTime,
+                    rsvpCount: 0,
+                    price: event.price ?? 0.0,
+                    status: .upcoming,
+                    imageURL: event.imageUrl
+                ))
                     .onDisappear {
                         // Refresh dashboard data after event editing
                         Task {
@@ -180,8 +198,8 @@ struct HostDashboardView: View {
                 } else if viewModel.myEvents.isEmpty {
                     emptyStateView(
                         icon: "calendar.badge.plus",
-                        title: "No Events Yet",
-                        message: "Create your first event to get started!",
+                        title: "Create your first event",
+                        message: "Start hosting amazing events and connect with your community!",
                         actionTitle: "Create Event",
                         action: { showingCreateEvent = true }
                     )
@@ -190,7 +208,7 @@ struct HostDashboardView: View {
                         HostEventCard(
                             event: event,
                             onEdit: { showingEventEdit = event },
-                            onDelete: { viewModel.deleteEvent(event) },
+                            onDelete: { Task { await viewModel.deleteEvent(event) } },
                             onViewRSVPs: { showingEventRSVP = event },
                             onViewAnalytics: {
                                 selectedEventForAnalytics = event
@@ -379,7 +397,7 @@ struct QuickActionButton: View {
 }
 
 struct HostEventCard: View {
-    let event: HostEvent
+    let event: Event
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onViewRSVPs: () -> Void
@@ -394,21 +412,21 @@ struct HostEventCard: View {
                         .font(Up2Typography.heading3)
                         .foregroundColor(Up2Colors.textPrimary)
                     
-                    Text(event.venueName)
+                    Text(event.location)
                         .font(Up2Typography.bodyMedium)
                         .foregroundColor(Up2Colors.textSecondary)
                 }
                 
                 Spacer()
                 
-                StatusBadge(status: event.status)
+                StatusBadge(event: event)
             }
             
             // Event Details
             HStack(spacing: 16) {
                 DetailItem(icon: "calendar", text: event.formattedDate)
-                DetailItem(icon: "person.3", text: "\(event.rsvpCount) RSVPs")
-                DetailItem(icon: "dollarsign.circle", text: event.formattedPrice)
+                DetailItem(icon: "person.3", text: "0 RSVPs") // TODO: Get from RSVP service
+                DetailItem(icon: "dollarsign.circle", text: event.price.map { "$\($0)" } ?? "Free")
             }
             
             // Action Buttons
@@ -463,10 +481,10 @@ struct HostEventCard: View {
 }
 
 struct StatusBadge: View {
-    let status: EventStatus
+    let event: Event
     
     var body: some View {
-        Text(status.rawValue)
+        Text(statusText)
             .font(Up2Typography.caption)
             .foregroundColor(.white)
             .padding(.horizontal, 8)
@@ -475,16 +493,27 @@ struct StatusBadge: View {
             .cornerRadius(12)
     }
     
+    private var statusText: String {
+        if event.isCompleted {
+            return "Completed"
+        } else if event.isActive {
+            return "Active"
+        } else if event.isUpcoming {
+            return "Upcoming"
+        } else {
+            return "Unknown"
+        }
+    }
+    
     private var statusColor: Color {
-        switch status {
-        case .upcoming:
-            return Color(red: 0.0, green: 0.48, blue: 1.0)
-        case .active:
-            return Color.green
-        case .completed:
-            return Color.gray
-        case .cancelled:
-            return Color.red
+        if event.isCompleted {
+            return .gray
+        } else if event.isActive {
+            return .green
+        } else if event.isUpcoming {
+            return .blue
+        } else {
+            return .gray
         }
     }
 }
@@ -529,11 +558,11 @@ struct RSVPCard: View {
                     .font(Up2Typography.bodyMedium)
                     .foregroundColor(Up2Colors.textPrimary)
                 
-                Text(rsvp.eventTitle)
+                Text("Event Title") // rsvp.eventTitle is not available in RSVPData
                     .font(Up2Typography.caption)
                     .foregroundColor(Up2Colors.textSecondary)
                 
-                Text("RSVP'd \(rsvp.formattedDate)")
+                Text("RSVP'd \(formatDate(rsvp.createdAt))")
                     .font(Up2Typography.caption)
                     .foregroundColor(Up2Colors.textTertiary)
             }
@@ -621,7 +650,7 @@ struct TopEventRow: View {
     var body: some View {
         HStack(spacing: 12) {
             // Event Image
-            AsyncImage(url: URL(string: event.imageURL ?? "")) { image in
+            AsyncImage(url: URL(string: "")) { image in // event.imageURL is not available in TopEvent
                 image
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -638,7 +667,7 @@ struct TopEventRow: View {
                     .font(Up2Typography.bodyMedium)
                     .foregroundColor(Up2Colors.textPrimary)
                 
-                Text("\(event.rsvpCount) RSVPs • \(event.rating)★")
+                Text("\(event.rsvpCount) RSVPs • 4.5★")
                     .font(Up2Typography.caption)
                     .foregroundColor(Up2Colors.textSecondary)
             }
@@ -646,7 +675,7 @@ struct TopEventRow: View {
             Spacer()
             
             // Revenue
-            Text(event.formattedRevenue)
+            Text("$\(event.revenue, specifier: "%.2f")")
                 .font(Up2Typography.bodyMedium)
                 .fontWeight(.semibold)
                 .foregroundColor(Color.green)
@@ -727,6 +756,15 @@ struct RSVPCardSkeleton: View {
         .background(Up2Colors.surface)
         .cornerRadius(12)
     }
+}
+
+// MARK: - Helper Functions
+
+private func formatDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
 }
 
 #Preview {

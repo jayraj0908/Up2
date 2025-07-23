@@ -11,34 +11,19 @@ struct TrendingTabView: View {
     @State private var selectedTimeframe: TrendingTimeframe = .today
     @State private var showingTimeframePicker = false
     @State private var refreshing = false
+    @State private var trendingEvents: [TrendingEvent] = []
+    @State private var trendingStats: TrendingStats?
+    @State private var errorMessage: String?
     
-    // MARK: - Mock Data
-    private let trendingEvents = [
-        TrendingEvent(id: "1", title: "Summer Music Festival", attendees: 1250, growth: 45, category: .music),
-        TrendingEvent(id: "2", title: "Tech Conference 2024", attendees: 800, growth: 32, category: .technology),
-        TrendingEvent(id: "3", title: "Art Gallery Opening", attendees: 450, growth: 28, category: .arts),
-        TrendingEvent(id: "4", title: "Food & Wine Festival", attendees: 920, growth: 25, category: .food),
-        TrendingEvent(id: "5", title: "Startup Pitch Night", attendees: 320, growth: 22, category: .business),
-        TrendingEvent(id: "6", title: "Outdoor Movie Night", attendees: 680, growth: 18, category: .entertainment),
-        TrendingEvent(id: "7", title: "Yoga in the Park", attendees: 200, growth: 15, category: .fitness),
-        TrendingEvent(id: "8", title: "Local Farmers Market", attendees: 580, growth: 12, category: .community)
-    ]
+    // MARK: - Services
+    private let trendingService = TrendingService.shared
     
     // MARK: - Body
     var body: some View {
         NavigationView {
             ZStack {
-                // Background - Consistent with host onboarding theme
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black,
-                        Color(red: 0.1, green: 0.0, blue: 0.3),
-                        Color(red: 0.3, green: 0.0, blue: 0.4)
-                    ]),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                // Liquid Glass Background
+                Up2LiquidGlassBackground()
                 
                 VStack(spacing: 0) {
                     // Header
@@ -49,6 +34,12 @@ struct TrendingTabView: View {
                 }
             }
             .navigationBarHidden(true)
+            .onAppear {
+                loadTrendingData()
+            }
+            .refreshable {
+                await refreshTrendingData()
+            }
         }
     }
     
@@ -98,17 +89,32 @@ struct TrendingTabView: View {
     // MARK: - Stats Overview
     private var statsOverview: some View {
         HStack(spacing: 0) {
-            StatCard(title: "Total Events", value: "\(trendingEvents.count)", icon: "calendar.circle.fill", color: .blue)
+            StatCard(
+                title: "Total Events", 
+                value: "\(trendingStats?.totalEvents ?? 0)", 
+                icon: "calendar.circle.fill", 
+                color: .blue
+            )
             
             Divider()
                 .frame(height: 40)
             
-            StatCard(title: "Avg Growth", value: "+23%", icon: "chart.line.uptrend.xyaxis.circle.fill", color: .green)
+            StatCard(
+                title: "Avg Growth", 
+                value: "+\(Int((trendingStats?.averageGrowth ?? 0) * 100))%", 
+                icon: "chart.line.uptrend.xyaxis.circle.fill", 
+                color: .green
+            )
             
             Divider()
                 .frame(height: 40)
             
-            StatCard(title: "Peak Interest", value: selectedTimeframe.peakTime, icon: "clock.circle.fill", color: .orange)
+            StatCard(
+                title: "Peak Interest", 
+                value: trendingStats?.peakTime ?? selectedTimeframe.peakTime, 
+                icon: "clock.circle.fill", 
+                color: .orange
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -118,6 +124,75 @@ struct TrendingTabView: View {
     
     // MARK: - Main Content
     private var mainContent: some View {
+        Group {
+            if trendingService.isLoading {
+                loadingView
+            } else if let errorMessage = errorMessage {
+                errorView(message: errorMessage)
+            } else if trendingEvents.isEmpty {
+                emptyStateView
+            } else {
+                trendingEventsView
+            }
+        }
+    }
+    
+    private var loadingView: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.2)
+            
+            Text("Loading trending events...")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private func errorView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundColor(.orange)
+            
+            Text("Failed to load trending events")
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            Text(message)
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            
+            Button("Try Again") {
+                loadTrendingData()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(24)
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "chart.bar.fill")
+                .font(.system(size: 48))
+                .foregroundColor(.orange)
+            
+            VStack(spacing: 8) {
+                Text("No Trending Events")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Text("Check back later for trending events in your area.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(24)
+    }
+    
+    private var trendingEventsView: some View {
         ScrollView {
             LazyVStack(spacing: 16) {
                 // Top trending section
@@ -125,9 +200,6 @@ struct TrendingTabView: View {
                 
                 // All trending events
                 allTrendingSection
-                
-                // Coming soon message
-                comingSoonSection
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -164,108 +236,34 @@ struct TrendingTabView: View {
         }
     }
     
-    // MARK: - Coming Soon Section
-    private var comingSoonSection: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "chart.bar.fill")
-                .font(.system(size: 48))
-                .foregroundColor(.orange)
-            
-            VStack(spacing: 8) {
-                Text("Enhanced Analytics Coming Soon")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                
-                Text("Epic 2 will bring real-time trending data, detailed analytics, and personalized trending recommendations.")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            
-            Button("Learn More") {
-                navigationCoordinator.presentModal(.help)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle)
+    // MARK: - Helper Methods
+    private func loadTrendingData() {
+        Task {
+            await refreshTrendingData()
         }
-        .padding(24)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(16)
-        .padding(.top, 20)
     }
     
-    // MARK: - Helper Methods
-    private func refreshTrendingEvents() async {
+    private func refreshTrendingData() async {
         refreshing = true
-        // Simulate API call
-        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        errorMessage = nil
+        
+        do {
+            async let eventsTask = trendingService.fetchTrendingEvents(timeframe: selectedTimeframe)
+            async let statsTask = trendingService.fetchTrendingStats(timeframe: selectedTimeframe)
+            
+            let (events, stats) = try await (eventsTask, statsTask)
+            
+            trendingEvents = events
+            trendingStats = stats
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        
         refreshing = false
     }
 }
 
 // MARK: - Supporting Types
-
-struct TrendingEvent: Identifiable {
-    let id: String
-    let title: String
-    let attendees: Int
-    let growth: Int // percentage
-    let category: TrendingCategory
-}
-
-enum TrendingTimeframe: String, CaseIterable {
-    case today = "Today"
-    case thisWeek = "This Week"
-    case thisMonth = "This Month"
-    
-    var displayName: String { rawValue }
-    
-    var peakTime: String {
-        switch self {
-        case .today: return "6-8 PM"
-        case .thisWeek: return "Fri-Sun"
-        case .thisMonth: return "Weekends"
-        }
-    }
-}
-
-// MARK: - Trending Category Enum
-enum TrendingCategory: String, CaseIterable {
-    case music = "Music"
-    case technology = "Technology"
-    case arts = "Arts"
-    case food = "Food"
-    case business = "Business"
-    case entertainment = "Entertainment"
-    case fitness = "Fitness"
-    case community = "Community"
-    
-    var icon: String {
-        switch self {
-        case .music: return "music.note"
-        case .technology: return "laptopcomputer"
-        case .arts: return "paintbrush"
-        case .food: return "fork.knife"
-        case .business: return "briefcase"
-        case .entertainment: return "tv"
-        case .fitness: return "figure.run"
-        case .community: return "person.3"
-        }
-    }
-    
-    var color: Color {
-        switch self {
-        case .music: return .purple
-        case .technology: return .blue
-        case .arts: return .pink
-        case .food: return .orange
-        case .business: return .green
-        case .entertainment: return .red
-        case .fitness: return .cyan
-        case .community: return .yellow
-        }
-    }
-}
 
 // MARK: - Supporting Views
 

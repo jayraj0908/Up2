@@ -1,169 +1,193 @@
 import Foundation
-import SwiftUI
+import Supabase
 
-// MARK: - Registration View Model
+@MainActor
 class RegistrationViewModel: ObservableObject {
-    
-    // MARK: - Published Properties
-    @Published var registrationData = RegistrationData()
-    @Published var registrationState: RegistrationState = .inputCredentials
-    @Published var emailValidation: ValidationResult = .valid
-    @Published var phoneValidation: ValidationResult = .valid
-    @Published var verificationCodeValidation: ValidationResult = .valid
     @Published var isLoading = false
+    @Published var errorMessage: String?
+    @Published var isRegistrationSuccessful = false
+    @Published var registrationState: RegistrationState = .inputCredentials
+    @Published var registrationData = RegistrationData()
+    @Published var emailValidation = ValidationResult()
+    @Published var passwordValidation = ValidationResult()
+    @Published var confirmPasswordValidation = ValidationResult()
     
-    // MARK: - Computed Properties
-    var currentInputValue: String {
-        switch registrationData.inputMethod {
-        case .email:
-            return registrationData.emailAddress
-        case .phone:
-            return registrationData.phoneNumber
-        }
-    }
+    private let authService = SupabaseAuthService.shared
     
     var isCurrentInputValid: Bool {
-        switch registrationData.inputMethod {
-        case .email:
-            return emailValidation.isValid && !registrationData.emailAddress.isEmpty
-        case .phone:
-            return phoneValidation.isValid && !registrationData.phoneNumber.isEmpty
-        }
+        !registrationData.emailAddress.isEmpty &&
+        !registrationData.password.isEmpty &&
+        !registrationData.confirmPassword.isEmpty &&
+        registrationData.password == registrationData.confirmPassword &&
+        emailValidation.errorMessage == nil &&
+        passwordValidation.errorMessage == nil &&
+        confirmPasswordValidation.errorMessage == nil
     }
     
-    // MARK: - Input Method Toggle
-    func selectInputMethod(_ method: RegistrationInputMethod) {
-        registrationData.inputMethod = method
-        clearValidationErrors()
+    // MARK: - Registration Data Model
+    struct RegistrationData {
+        var emailAddress: String = ""
+        var password: String = ""
+        var confirmPassword: String = ""
     }
     
-    // MARK: - Input Updates
+    // MARK: - Registration State
+    enum RegistrationState {
+        case inputCredentials
+        case completed
+        case error(String)
+    }
+    
+    // MARK: - Validation Result
+    struct ValidationResult {
+        var errorMessage: String?
+        var isValid: Bool { errorMessage == nil }
+    }
+    
+    // MARK: - Data Binding Methods
     func updateEmailAddress(_ email: String) {
         registrationData.emailAddress = email
-        emailValidation = ValidationService.validateEmail(email)
+        validateEmail()
     }
     
-    func updatePhoneNumber(_ phone: String) {
-        registrationData.phoneNumber = phone
-        phoneValidation = ValidationService.validatePhoneNumber(phone)
+    func updatePassword(_ password: String) {
+        registrationData.password = password
+        validatePassword()
+        validateConfirmPassword()
     }
     
-    func updateVerificationCode(_ code: String) {
-        registrationData.verificationCode = code
-        verificationCodeValidation = ValidationService.validateVerificationCode(code)
+    func updateConfirmPassword(_ confirmPassword: String) {
+        registrationData.confirmPassword = confirmPassword
+        validateConfirmPassword()
     }
     
-    // MARK: - Registration Flow
-    func sendVerificationCode() {
-        guard isCurrentInputValid else { return }
-        
-        isLoading = true
-        clearValidationErrors()
-        
-        Task {
-            do {
-                switch registrationData.inputMethod {
-                case .email:
-                    _ = try await SupabaseAuthService.shared.signUpWithEmail(registrationData.emailAddress)
-                case .phone:
-                    _ = try await SupabaseAuthService.shared.signUpWithPhone(registrationData.phoneNumber)
-                }
-                
-                await MainActor.run {
-                    self.isLoading = false
-                    self.registrationState = .awaitingVerification
-                }
-                
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.registrationState = .error(error.localizedDescription)
-                }
-            }
+    // MARK: - Validation Methods
+    private func validateEmail() {
+        if registrationData.emailAddress.isEmpty {
+            emailValidation.errorMessage = "Email is required"
+        } else if !isValidEmail(registrationData.emailAddress) {
+            emailValidation.errorMessage = "Please enter a valid email address"
+        } else {
+            emailValidation.errorMessage = nil
         }
     }
     
-    func verifyCode() {
-        guard verificationCodeValidation.isValid else { return }
-        
-        isLoading = true
-        registrationState = .verifying
-        
-        Task {
-            do {
-                let email = registrationData.inputMethod == .email ? registrationData.emailAddress : nil
-                let phone = registrationData.inputMethod == .phone ? registrationData.phoneNumber : nil
-                
-                let verifiedUser = try await SupabaseAuthService.shared.verifyOTP(
-                    code: registrationData.verificationCode,
-                    email: email,
-                    phone: phone
-                )
-                
-                // Set the current user in app state
-                await AppStateManager.shared.setCurrentUser(verifiedUser)
-                
-                // Create user profile in database after successful verification
-                _ = try await UserProfileService.shared.createUserProfile(for: verifiedUser)
-                
-                await MainActor.run {
-                    self.isLoading = false
-                    self.registrationState = .completed
-                    
-                    // Trigger navigation after successful registration
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        AppStateManager.shared.handleRegistrationComplete()
-                    }
-                }
-                
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.registrationState = .error(error.localizedDescription)
-                    // Reset to allow retry
-                    self.registrationData.verificationCode = ""
-                    self.verificationCodeValidation = .valid
-                }
-            }
+    private func validatePassword() {
+        if registrationData.password.isEmpty {
+            passwordValidation.errorMessage = "Password is required"
+        } else if registrationData.password.count < 6 {
+            passwordValidation.errorMessage = "Password must be at least 6 characters"
+        } else {
+            passwordValidation.errorMessage = nil
         }
     }
     
-    func resendVerificationCode() {
-        isLoading = true
-        
-        Task {
-            do {
-                // Re-trigger the signup process to resend verification
-                switch registrationData.inputMethod {
-                case .email:
-                    _ = try await SupabaseAuthService.shared.signUpWithEmail(registrationData.emailAddress)
-                case .phone:
-                    _ = try await SupabaseAuthService.shared.signUpWithPhone(registrationData.phoneNumber)
-                }
-                
-                await MainActor.run {
-                    self.isLoading = false
-                }
-                
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.registrationState = .error(error.localizedDescription)
-                }
-            }
+    private func validateConfirmPassword() {
+        if registrationData.confirmPassword.isEmpty {
+            confirmPasswordValidation.errorMessage = "Please confirm your password"
+        } else if registrationData.password != registrationData.confirmPassword {
+            confirmPasswordValidation.errorMessage = "Passwords do not match"
+        } else {
+            confirmPasswordValidation.errorMessage = nil
         }
     }
     
+    private func isValidEmail(_ email: String) -> Bool {
+        let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+        let emailPredicate = NSPredicate(format:"SELF MATCHES %@", emailRegex)
+        return emailPredicate.evaluate(with: email)
+    }
+    
+    // MARK: - Reset Method
     func resetRegistration() {
         registrationData = RegistrationData()
+        emailValidation = ValidationResult()
+        passwordValidation = ValidationResult()
+        confirmPasswordValidation = ValidationResult()
         registrationState = .inputCredentials
-        clearValidationErrors()
+        errorMessage = nil
+        isRegistrationSuccessful = false
     }
     
-    // MARK: - Helper Methods
-    private func clearValidationErrors() {
-        emailValidation = .valid
-        phoneValidation = .valid
-        verificationCodeValidation = .valid
+    // MARK: - Sign Up Method
+    func signUp() async {
+        guard isCurrentInputValid else { return }
+        
+        registrationState = .inputCredentials
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            print("🔄 Starting user registration for: \(registrationData.emailAddress)")
+            
+            // Sign up the user using Supabase Auth
+            let session = try await SupabaseManager.shared.client.auth.signUp(
+                email: registrationData.emailAddress, 
+                password: registrationData.password
+            )
+            
+            print("✅ User signed up successfully")
+            
+            // Insert a new row into users table
+            try await SupabaseManager.shared.client
+                .from("users")
+                .insert([
+                    "id": session.user.id.uuidString,
+                    "email": registrationData.emailAddress,
+                    "full_name": registrationData.emailAddress.components(separatedBy: "@").first ?? "User"
+                ])
+                .execute()
+            
+            print("✅ User record created in users table")
+            
+            // Insert into profiles with the same id, set is_curator = false
+            try await SupabaseManager.shared.client
+                .from("profiles")
+                .insert([
+                    "id": session.user.id.uuidString,
+                    "name": registrationData.emailAddress.components(separatedBy: "@").first ?? "User",
+                    "handle": "user_\(session.user.id.uuidString.prefix(8))",
+                    "is_curator": "false",
+                    "created_at": ISO8601DateFormatter().string(from: Date()),
+                    "updated_at": ISO8601DateFormatter().string(from: Date())
+                ])
+                .execute()
+            
+            print("✅ Profile created in profiles table")
+            
+            isRegistrationSuccessful = true
+            registrationState = .completed
+            
+        } catch {
+            print("❌ Registration failed: \(error)")
+            errorMessage = "Registration failed: \(error.localizedDescription)"
+            registrationState = .error(error.localizedDescription)
+        }
+        
+        isLoading = false
+    }
+    
+    func login(email: String, password: String) async throws {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            print("🔄 Attempting login for: \(email)")
+            
+            // Sign in the user using Supabase Auth
+            try await SupabaseManager.shared.client.auth.signIn(
+                email: email, 
+                password: password
+            )
+            
+            print("✅ Login successful")
+            
+        } catch {
+            print("❌ Login failed: \(error)")
+            errorMessage = "Login failed: \(error.localizedDescription)"
+            throw error
+        }
+        
+        isLoading = false
     }
 } 

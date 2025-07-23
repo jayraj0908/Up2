@@ -6,7 +6,9 @@ struct LoginView: View {
     
     // Animation states
     @State private var emailFieldOffset: CGFloat = 50
+    @State private var passwordFieldOffset: CGFloat = 50
     @State private var emailFieldOpacity: Double = 0
+    @State private var passwordFieldOpacity: Double = 0
     @State private var buttonScale: CGFloat = 0.9
     @State private var backgroundOpacity: Double = 0
     
@@ -22,12 +24,12 @@ struct LoginView: View {
                     switch viewModel.loginState {
                     case .inputCredentials:
                         loginFormView
-                    case .awaitingVerification, .verifying:
-                        LoginVerificationCodeView(viewModel: viewModel)
                     case .completed:
                         loginCompletedView
                     case .error(let message):
                         errorView(message: message)
+                    default:
+                        loginFormView
                     }
                     
                     Spacer()
@@ -92,18 +94,21 @@ struct LoginView: View {
     // MARK: - Login Form View
     private var loginFormView: some View {
         VStack(spacing: Up2Spacing.lg) {
-            // Floating email input field
-            floatingEmailField
+            // Email input field
+            emailField
+            
+            // Password input field
+            passwordField
+            
+            // Sign in button
             signInButton
         }
         .offset(y: emailFieldOffset)
         .opacity(emailFieldOpacity)
     }
     
-    // MARK: - Floating Email Field
-    private var floatingEmailField: some View {
-        VStack(alignment: .leading, spacing: Up2Spacing.xs) {
-            // Email input with enhanced styling
+    // MARK: - Email Field
+    private var emailField: some View {
             VStack(alignment: .leading, spacing: Up2Spacing.xs) {
                 Text("Email Address")
                     .font(Up2Typography.caption.weight(.medium))
@@ -123,7 +128,6 @@ struct LoginView: View {
                     .foregroundColor(Up2Colors.textOnPrimary)
                     .autocapitalization(.none)
                     .keyboardType(.emailAddress)
-                }
             }
             .padding(.horizontal, Up2Spacing.lg)
             .padding(.vertical, Up2Spacing.md)
@@ -148,17 +152,53 @@ struct LoginView: View {
         }
     }
     
+    // MARK: - Password Field
+    private var passwordField: some View {
+        VStack(alignment: .leading, spacing: Up2Spacing.xs) {
+            Text("Password")
+                .font(Up2Typography.caption.weight(.medium))
+                .foregroundColor(Up2Colors.textOnPrimary.opacity(0.8))
+            
+            HStack {
+                Image(systemName: "lock.fill")
+                    .foregroundColor(Up2Colors.textOnPrimary.opacity(0.6))
+                    .frame(width: 20)
+                
+                SecureField("Enter your password", text: Binding(
+                    get: { viewModel.loginData.password },
+                    set: { viewModel.updatePassword($0) }
+                ))
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(Up2Typography.body)
+                .foregroundColor(Up2Colors.textOnPrimary)
+            }
+            .padding(.horizontal, Up2Spacing.lg)
+            .padding(.vertical, Up2Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Up2Colors.surfaceElevated.opacity(0.2))
+                    .stroke(
+                        viewModel.passwordValidation.errorMessage != nil ? 
+                        Up2Colors.error : Up2Colors.primary.opacity(0.3),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+            
+            // Error message
+            if let errorMessage = viewModel.passwordValidation.errorMessage {
+                Text(errorMessage)
+                    .font(Up2Typography.caption)
+                    .foregroundColor(Up2Colors.error)
+                    .padding(.leading, Up2Spacing.lg)
+            }
+        }
+    }
+    
     // MARK: - Sign In Button
     private var signInButton: some View {
         Button(action: {
-            // Bypass logic for testing - allow any email
-            if !viewModel.loginData.emailAddress.isEmpty {
-                // Simulate successful login
-                viewModel.loginData.emailAddress = "test@up2.com" // Set a default for demo
-                handleDummyLogin()
-            } else {
-                viewModel.sendVerificationCode()
-            }
+            viewModel.signIn()
         }) {
             HStack {
                 if viewModel.isLoading {
@@ -187,7 +227,7 @@ struct LoginView: View {
             .shadow(color: Up2Colors.primary.opacity(0.3), radius: 10, x: 0, y: 5)
             .scaleEffect(buttonScale)
         }
-        .disabled(viewModel.isLoading)
+        .disabled(viewModel.isLoading || !viewModel.isCurrentInputValid)
         .animation(.easeInOut(duration: 0.2), value: buttonScale)
         .onTapGesture {
             withAnimation(.easeInOut(duration: 0.1)) {
@@ -262,7 +302,7 @@ struct LoginView: View {
             
             Button("Create one →") {
                 // Navigate to registration view
-                appStateManager.appFlow = .registration
+                // Navigate to registration
             }
             .font(Up2Typography.buttonMedium)
             .foregroundColor(Color(red: 0.0, green: 0.48, blue: 1.0)) // Blue color
@@ -280,30 +320,15 @@ struct LoginView: View {
             emailFieldOffset = 0
             emailFieldOpacity = 1.0
         }
-    }
-    
-    // MARK: - Dummy Login Handler
-    private func handleDummyLogin() {
-        // Simulate successful login for testing
-        print("🔐 Dummy login successful with email: \(viewModel.loginData.emailAddress)")
         
-        // Create a dummy user for testing
-        let dummyUser = SupabaseAuthService.AuthUser(
-            id: UUID().uuidString,
-            email: viewModel.loginData.emailAddress,
-            phone: nil,
-            isHost: false
-        )
-        
-        // Update app state to simulate authenticated user
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            appStateManager.setCurrentUser(dummyUser)
-            appStateManager.appFlow = .mainApp
+        withAnimation(.easeOut(duration: 0.6).delay(0.4)) {
+            passwordFieldOffset = 0
+            passwordFieldOpacity = 1.0
         }
     }
 }
 
 #Preview {
     LoginView()
-        .environmentObject(AppStateManager.shared)
+        .environmentObject(AppStateManager())
 } 

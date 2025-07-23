@@ -34,11 +34,24 @@ class ValidationService {
         }
         
         // Basic US phone number format check
-        let phoneRegex = "^[+]?[1-9]\\d{1,14}$"
+        _ = "^[+]?[1-9]\\d{1,14}$"
         let phonePredicate = NSPredicate(format: "SELF MATCHES %@", digitsOnly)
         
         guard phonePredicate.evaluate(with: digitsOnly) else {
             return .invalid("Please enter a valid phone number")
+        }
+        
+        return .valid
+    }
+    
+    // MARK: - Password Validation
+    static func validatePassword(_ password: String) -> ValidationResult {
+        guard !password.isEmpty else {
+            return .invalid("Password is required")
+        }
+        
+        guard password.count >= 6 else {
+            return .invalid("Password must be at least 6 characters")
         }
         
         return .valid

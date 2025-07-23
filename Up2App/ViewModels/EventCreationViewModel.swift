@@ -18,18 +18,18 @@ class EventCreationViewModel: ObservableObject {
     @Published var coverImage: UIImage?
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var isEventCreated = false
     
     // MARK: - Services
-    private let hostService = EventHostService.shared
+    private let eventService = EventService.shared
+    private let authService = SupabaseAuthService.shared
     
     // MARK: - Computed Properties
     var isFormValid: Bool {
         !eventTitle.isEmpty &&
-        !eventType.isEmpty &&
         !venueName.isEmpty &&
         !eventDescription.isEmpty &&
-        !selectedVibeTags.isEmpty &&
-        coverImage != nil
+        !selectedVibeTags.isEmpty
     }
     
     var formattedPrice: String {
@@ -47,7 +47,12 @@ class EventCreationViewModel: ObservableObject {
     // MARK: - Methods
     func createEvent() async {
         guard isFormValid else {
-            errorMessage = "Please fill in all required fields and add a cover photo."
+            errorMessage = "Please fill in all required fields."
+            return
+        }
+        
+        guard let currentUser = authService.currentUser else {
+            errorMessage = "You must be logged in to create an event."
             return
         }
         
@@ -55,23 +60,33 @@ class EventCreationViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            // Create HostEvent from form data
-            let event = HostEvent(
-                id: UUID(),
+            // Combine date and time
+            let combinedDateTime = Calendar.current.date(bySettingHour: Calendar.current.component(.hour, from: eventTime), minute: Calendar.current.component(.minute, from: eventTime), second: 0, of: eventDate) ?? eventDate
+            
+            // Set end time to 3 hours after start time (default)
+            let endTime = Calendar.current.date(byAdding: .hour, value: 3, to: combinedDateTime) ?? combinedDateTime
+            
+            // Create event request
+            let eventRequest = EventCreationRequest(
+                hostId: UUID(uuidString: authService.currentUser?.id ?? "") ?? UUID(),
                 title: eventTitle,
-                venueName: venueName,
-                date: Calendar.current.date(bySettingHour: Calendar.current.component(.hour, from: eventTime), minute: Calendar.current.component(.minute, from: eventTime), second: 0, of: eventDate) ?? eventDate,
-                rsvpCount: 0,
-                price: Double(price) ?? 0.0,
-                status: .upcoming,
-                imageURL: nil // In real app, upload image and get URL
+                description: eventDescription,
+                imageUrl: nil, // TODO: Upload image and get URL
+                tags: selectedVibeTags.map { $0.rawValue },
+                location: venueName,
+                startTime: combinedDateTime,
+                endTime: endTime,
+                isPublic: true,
+                capacity: nil,
+                price: price.isEmpty ? nil : Double(price)
             )
             
-            // Use the host service to create the event
-            let createdEvent = try await hostService.createEvent(event)
+            // Create event using EventService
+            let createdEvent = try await eventService.createEvent(eventRequest)
             print("🎉 Event created successfully: \(createdEvent.title)")
             
-            // Reset form
+            // Mark as created and reset form
+            isEventCreated = true
             resetForm()
             
         } catch {
@@ -95,6 +110,7 @@ class EventCreationViewModel: ObservableObject {
         selectedVibeTags.removeAll()
         coverImage = nil
         errorMessage = nil
+        isEventCreated = false
     }
     
     func loadImage(from item: PhotosPickerItem) async {
@@ -114,6 +130,12 @@ class EventCreationViewModel: ObservableObject {
         } else {
             selectedVibeTags.insert(tag)
         }
+    }
+    
+    func setLocation(name: String, address: String, lat: Double, lng: Double) {
+        venueName = name
+        venueAddress = address
+        coordinates = (lat, lng)
     }
 }
 

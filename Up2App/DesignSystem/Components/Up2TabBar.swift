@@ -76,8 +76,10 @@ struct Up2TabBar: View {
         let isSelected = selectedTab == item.id
         
         Button(action: {
-            selectedTab = item.id
-            onTabSelected(item.id)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.6, blendDuration: 0)) {
+                selectedTab = item.id
+                onTabSelected(item.id)
+            }
         }) {
             VStack(spacing: Up2Spacing.xs) {
                 // Icon with badge
@@ -87,20 +89,22 @@ struct Up2TabBar: View {
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .frame(width: 24, height: 24)
-                            .scaleEffect(isSelected ? 1.1 : 1.0)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+                            .scaleEffect(isSelected ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.6), value: isSelected)
                     } else {
                         Image(systemName: iconName(for: item, isSelected: isSelected))
                             .font(.system(size: 24, weight: isSelected ? .semibold : .medium))
                             .foregroundColor(iconColor(isSelected: isSelected))
-                            .scaleEffect(isSelected ? 1.1 : 1.0)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+                            .scaleEffect(isSelected ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.6), value: isSelected)
                     }
                     
                     // Badge
                     if let badge = item.badge {
                         badgeView(badge: badge)
                             .offset(x: 12, y: -8)
+                            .scaleEffect(isSelected ? 1.1 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
                     }
                 }
                 
@@ -111,9 +115,17 @@ struct Up2TabBar: View {
                     .foregroundColor(titleColor(isSelected: isSelected))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+                    .scaleEffect(isSelected ? 1.05 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isSelected)
             }
             .padding(.vertical, Up2Spacing.xs)
             .padding(.horizontal, Up2Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? Up2Colors.primary.opacity(0.1) : Color.clear)
+                    .scaleEffect(isSelected ? 1.0 : 0.8)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+            )
         }
         .buttonStyle(PlainButtonStyle())
     }

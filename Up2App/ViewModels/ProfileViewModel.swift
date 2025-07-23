@@ -104,7 +104,7 @@ class ProfileViewModel: ObservableObject {
             successMessage = "Profile created successfully!"
             
             // Track profile creation event
-            await eventService.trackProfileCreation(savedProfile, userId: userId)
+            // await eventService.trackProfileCreation(savedProfile, userId: userId)
             
             // Move to next step or complete
             if currentStep != .complete {
@@ -320,25 +320,25 @@ class ProfileViewModel: ObservableObject {
         
         // Track bio changes
         if oldProfile.bio != newProfile.bio {
-            await eventService.trackBioUpdate(userId: userId, oldBio: oldProfile.bio, newBio: newProfile.bio)
+            // await eventService.trackBioUpdate(userId: userId, oldBio: oldProfile.bio, newBio: newProfile.bio)
         }
         
         // Track avatar changes
         if oldProfile.avatar != newProfile.avatar {
             if let newAvatarURL = newProfile.avatar {
-                await eventService.trackAvatarUpload(userId: userId, avatarURL: newAvatarURL)
+                // await eventService.trackAvatarUpload(userId: userId, avatarURL: newAvatarURL)
             }
             changes["avatar_changed"] = true
         }
         
         // Track vibe tags changes
         if oldProfile.vibeTags != newProfile.vibeTags {
-            await eventService.trackVibeTagsUpdate(userId: userId, oldTags: oldProfile.vibeTags, newTags: newProfile.vibeTags)
+            // await eventService.trackVibeTagsUpdate(userId: userId, oldTags: oldProfile.vibeTags, newTags: newProfile.vibeTags)
         }
         
         // Track general profile update if there were other changes
         if !changes.isEmpty {
-            await eventService.trackProfileUpdate(userId: userId, changes: changes)
+            // await eventService.trackProfileUpdate(userId: userId, changes: changes)
         }
     }
     

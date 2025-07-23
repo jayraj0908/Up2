@@ -7,7 +7,7 @@ class ProfileService: ObservableObject {
     static let shared = ProfileService()
     
     private let authService = SupabaseAuthService.shared
-    private var supabase: SupabaseClient { authService.supabaseClient }
+    private var supabase: SupabaseClient { authService.supabase }
     private var storage: SupabaseStorageClient { supabase.storage }
     
     private init() {}
@@ -27,9 +27,21 @@ class ProfileService: ObservableObject {
         try await validateHandleUniqueness(profile.handle, excludingUserId: nil)
         
         do {
+            let profileRecord = ProfileRecord(
+                id: profile.id.uuidString,
+                name: profile.name,
+                handle: profile.handle,
+                avatar: profile.avatar,
+                vibeTags: profile.vibeTags.map { $0.rawValue },
+                bio: profile.bio,
+                isCurator: profile.isCurator,
+                createdAt: ISO8601DateFormatter().string(from: profile.createdAt),
+                updatedAt: ISO8601DateFormatter().string(from: profile.updatedAt)
+            )
+            
             try await supabase
                 .from("profiles")
-                .insert(profile)
+                .insert(profileRecord)
                 .execute()
             
             return profile
@@ -57,6 +69,15 @@ class ProfileService: ObservableObject {
         }
     }
     
+    // MARK: - Profile Fetch (as requested in prompt)
+    
+    func getProfile(for userId: String) async throws -> ProfileData? {
+        guard let uuid = UUID(uuidString: userId) else {
+            throw ProfileError.invalidUserId("Invalid user ID format")
+        }
+        return try await getProfile(for: uuid)
+    }
+    
     func updateProfile(_ profileData: ProfileData) async throws -> ProfileData {
         // Validate profile data
         guard profileData.isValid else {
@@ -70,9 +91,21 @@ class ProfileService: ObservableObject {
         updatedProfile.updatedAt = Date()
         
         do {
+            let profileRecord = ProfileRecord(
+                id: updatedProfile.id.uuidString,
+                name: updatedProfile.name,
+                handle: updatedProfile.handle,
+                avatar: updatedProfile.avatar,
+                vibeTags: updatedProfile.vibeTags.map { $0.rawValue },
+                bio: updatedProfile.bio,
+                isCurator: updatedProfile.isCurator,
+                createdAt: ISO8601DateFormatter().string(from: updatedProfile.createdAt),
+                updatedAt: ISO8601DateFormatter().string(from: updatedProfile.updatedAt)
+            )
+            
             try await supabase
                 .from("profiles")
-                .update(updatedProfile)
+                .update(profileRecord)
                 .eq("id", value: updatedProfile.id.uuidString)
                 .execute()
             
@@ -80,6 +113,140 @@ class ProfileService: ObservableObject {
         } catch {
             throw ProfileError.updateFailed("Failed to update profile: \(error.localizedDescription)")
         }
+    }
+    
+    func updateProfileToHost(userId: UUID) async throws -> ProfileData {
+        guard let currentUser = authService.currentUser else {
+            throw ProfileError.userNotAuthenticated()
+        }
+        
+        // Verify the user is updating their own profile
+        guard currentUser.id == userId.uuidString else {
+            throw ProfileError.unauthorized()
+        }
+        
+        // Get current profile or create one if it doesn't exist
+        let currentProfile = try await getProfile(for: userId)
+        
+        if currentProfile == nil {
+            print("📝 Profile not found, creating new profile for host onboarding")
+            
+            // Create a basic profile directly in the database
+            let profileRecord = ProfileRecord(
+                id: userId.uuidString,
+                name: "User",
+                handle: "user_\(userId.uuidString.prefix(8))",
+                avatar: nil,
+                vibeTags: [],
+                bio: "",
+                isCurator: true, // Set as host immediately
+                createdAt: ISO8601DateFormatter().string(from: Date()),
+                updatedAt: ISO8601DateFormatter().string(from: Date())
+            )
+            
+            do {
+                try await supabase
+                    .from("profiles")
+                    .insert(profileRecord)
+                    .execute()
+                
+                print("✅ Profile created successfully as host")
+                
+                // Return the created profile
+                return ProfileData(
+                    id: userId,
+                    name: profileRecord.name,
+                    handle: profileRecord.handle,
+                    avatar: profileRecord.avatar,
+                    vibeTags: [],
+                    bio: profileRecord.bio,
+                    isCurator: profileRecord.isCurator,
+                    createdAt: Date(),
+                    updatedAt: Date()
+                )
+            } catch {
+                print("❌ Failed to create profile: \(error)")
+                throw ProfileError.createFailed("Failed to create profile: \(error.localizedDescription)")
+            }
+        }
+        
+        guard var profile = currentProfile else {
+            throw ProfileError.profileNotFound
+        }
+        
+        // Update existing profile to become a host/curator
+        profile.isCurator = true
+        profile.updatedAt = Date()
+        
+        do {
+            let profileRecord = ProfileRecord(
+                id: profile.id.uuidString,
+                name: profile.name,
+                handle: profile.handle,
+                avatar: profile.avatar,
+                vibeTags: profile.vibeTags.map { $0.rawValue },
+                bio: profile.bio,
+                isCurator: profile.isCurator,
+                createdAt: ISO8601DateFormatter().string(from: profile.createdAt),
+                updatedAt: ISO8601DateFormatter().string(from: profile.updatedAt)
+            )
+            
+            try await supabase
+                .from("profiles")
+                .update(profileRecord)
+                .eq("id", value: profile.id.uuidString)
+                .execute()
+            
+            print("✅ Profile updated to host successfully")
+            return profile
+        } catch {
+            print("❌ Failed to update profile: \(error)")
+            throw ProfileError.updateFailed("Failed to update profile: \(error.localizedDescription)")
+        }
+    }
+    
+    func createBasicProfile(userId: UUID) async throws -> ProfileData {
+        guard let currentUser = authService.currentUser else {
+            throw ProfileError.userNotAuthenticated()
+        }
+        
+        // Verify the user is creating their own profile
+        guard currentUser.id == userId.uuidString else {
+            throw ProfileError.unauthorized()
+        }
+        
+        // Check if profile already exists
+        let existingProfile = try await getProfile(for: userId)
+        if existingProfile != nil {
+            return existingProfile!
+        }
+        
+        print("📝 Creating basic profile for user onboarding")
+        
+        // Create a basic profile for regular users
+        let profileRecord = ProfileRecord(
+            id: userId.uuidString,
+            name: currentUser.email ?? "User",
+            handle: "user_\(userId.uuidString.prefix(8))",
+            avatar: nil,
+            vibeTags: [],
+            bio: "",
+            isCurator: false,
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        
+        try await supabase
+            .from("profiles")
+            .insert(profileRecord)
+            .execute()
+        
+        // Fetch and return the created profile
+        guard let createdProfile = try await getProfile(for: userId) else {
+            throw ProfileError.createFailed("Failed to create basic profile")
+        }
+        
+        return createdProfile
     }
     
     func deleteProfile(for userId: UUID) async throws {
@@ -232,6 +399,30 @@ class ProfileService: ObservableObject {
 
 // MARK: - Supporting Types
 
+private struct ProfileRecord: Codable {
+    let id: String
+    let name: String
+    let handle: String
+    let avatar: String?
+    let vibeTags: [String]
+    let bio: String
+    let isCurator: Bool
+    let createdAt: String
+    let updatedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case handle
+        case avatar
+        case vibeTags = "vibe_tags"
+        case bio
+        case isCurator = "is_curator"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
 private struct ProfileResponse: Codable {
     let id: String
     let name: String
@@ -239,6 +430,7 @@ private struct ProfileResponse: Codable {
     let avatar: String?
     let vibe_tags: [String]
     let bio: String
+    let is_curator: Bool
     let created_at: String
     let updated_at: String
     
@@ -262,6 +454,7 @@ private struct ProfileResponse: Codable {
             avatar: avatar,
             vibeTags: vibeTags,
             bio: bio,
+            isCurator: is_curator,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -284,4 +477,6 @@ extension ProfileError {
     static func validationFailed(_ message: String) -> ProfileError { return .profileCreationFailed }
     static func searchFailed(_ message: String) -> ProfileError { return .networkError }
     static func invalidData(_ message: String) -> ProfileError { return .profileNotFound }
+    static func userNotAuthenticated() -> ProfileError { return .networkError }
+    static func unauthorized() -> ProfileError { return .networkError }
 } 

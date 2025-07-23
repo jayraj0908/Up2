@@ -13,7 +13,7 @@ class EventFeedViewModel: NSObject, ObservableObject {
     @Published var lastUpdated: Date?
     @Published var hasMoreEvents = true
     
-    private let discoveryService = EventDiscoveryService.shared
+    private let eventService = EventService.shared
     private let authService = SupabaseAuthService.shared
     private let profileService = ProfileService.shared
     
@@ -35,21 +35,89 @@ class EventFeedViewModel: NSObject, ObservableObject {
     // MARK: - Public Interface
     
     func loadInitialFeed() async {
-        guard feedState == .idle else { return }
+        guard case .idle = feedState else { return }
         
         feedState = .loading
         
         do {
-            let request = createFeedRequest(page: 0)
-            let response = try await discoveryService.generatePersonalizedFeed(request: request)
+            print("🔄 Loading initial feed...")
             
-            feedState = .loaded(response.items)
-            hasMoreEvents = response.hasMore
+            // Fetch real events from Supabase
+            var events = try await eventService.fetchPublicEvents(location: "Los Angeles")
+            print("📅 Fetched \(events.count) events from Supabase")
+            
+            // If no events found, create sample events
+            if events.isEmpty {
+                print("⚠️ No events found in database, creating sample events...")
+                try await createSampleEvents()
+                events = try await eventService.fetchPublicEvents(location: "Los Angeles")
+                print("📅 After creating samples: \(events.count) events")
+            }
+            
+            // Fetch host profiles for all events
+            let hostIds = Array(Set(events.map { $0.hostId }))
+            print("👥 Fetching profiles for \(hostIds.count) hosts")
+            let hostProfiles = try await fetchHostProfiles(hostIds: hostIds)
+            print("✅ Fetched \(hostProfiles.count) host profiles")
+            
+            // Convert events to feed items with real host data
+            let feedItems = events.compactMap { event -> EventFeedItem? in
+                guard let hostProfile = hostProfiles.first(where: { $0.id == event.hostId }) else {
+                    print("⚠️ No host profile found for event: \(event.title)")
+                    // Create a fallback host profile
+                    let fallbackHost = EventHost(
+                        id: event.hostId,
+                        name: "Unknown Host",
+                        handle: "@unknown",
+                        avatarUrl: nil,
+                        vibeTags: [],
+                        isVerified: false
+                    )
+                    
+                    return EventFeedItem(
+                        id: event.id,
+                        event: event,
+                        host: fallbackHost,
+                        score: 0.5,
+                        attendeeCount: 0,
+                        friendsAttending: [],
+                        isBookmarked: false,
+                        distanceFromUser: calculateDistanceFromUser(event: event)
+                    )
+                }
+                
+                return EventFeedItem(
+                    id: event.id,
+                    event: event,
+                    host: EventHost(
+                        id: event.hostId,
+                        name: hostProfile.name,
+                        handle: hostProfile.handle,
+                        avatarUrl: hostProfile.avatar,
+                        vibeTags: hostProfile.vibeTags,
+                        isVerified: hostProfile.isCurator
+                    ),
+                    score: calculateEventScore(event: event, hostProfile: hostProfile),
+                    attendeeCount: 0, // Will be implemented with RSVP service
+                    friendsAttending: [],
+                    isBookmarked: false,
+                    distanceFromUser: calculateDistanceFromUser(event: event)
+                )
+            }
+            
+            print("✅ Created \(feedItems.count) feed items")
+            feedState = .loaded(feedItems)
+            hasMoreEvents = false // For now, load all events at once
             lastUpdated = Date()
             currentPage = 0
             
         } catch {
-            feedState = .error(error.localizedDescription)
+            print("❌ Error loading feed: \(error)")
+            print("🔍 Error details: \(error.localizedDescription)")
+            
+            // Provide a more user-friendly error message
+            let errorMessage = getErrorMessage(for: error)
+            feedState = .error(errorMessage)
         }
     }
     
@@ -58,46 +126,64 @@ class EventFeedViewModel: NSObject, ObservableObject {
         feedState = currentItems.isEmpty ? .loading : .refreshing(currentItems)
         
         do {
-            let request = createFeedRequest(page: 0)
-            let response = try await discoveryService.refreshFeed(for: request)
+            // Fetch real events from Supabase
+            let events = try await eventService.fetchPublicEvents(location: "Los Angeles")
             
-            feedState = .loaded(response.items)
-            hasMoreEvents = response.hasMore
+            // Fetch host profiles for all events
+            let hostIds = Array(Set(events.map { $0.hostId }))
+            let hostProfiles = try await fetchHostProfiles(hostIds: hostIds)
+            
+            // Convert events to feed items with real host data
+            let feedItems = events.compactMap { event -> EventFeedItem? in
+                guard let hostProfile = hostProfiles.first(where: { $0.id == event.hostId }) else {
+                    return nil
+                }
+                
+                return EventFeedItem(
+                    id: event.id,
+                    event: event,
+                    host: EventHost(
+                        id: event.hostId,
+                        name: hostProfile.name,
+                        handle: hostProfile.handle,
+                        avatarUrl: hostProfile.avatar,
+                        vibeTags: hostProfile.vibeTags,
+                        isVerified: hostProfile.isCurator
+                    ),
+                    score: calculateEventScore(event: event, hostProfile: hostProfile),
+                    attendeeCount: 0, // Will be implemented with RSVP service
+                    friendsAttending: [],
+                    isBookmarked: false,
+                    distanceFromUser: calculateDistanceFromUser(event: event)
+                )
+            }
+            
+            feedState = .loaded(feedItems)
             lastUpdated = Date()
-            currentPage = 0
             
         } catch {
             feedState = .error(error.localizedDescription)
         }
     }
     
-    func loadMoreIfNeeded() async {
-        guard hasMoreEvents,
-              case .loaded(let currentItems) = feedState,
-              !currentItems.isEmpty else { return }
+    func loadMoreEvents() async {
+        guard hasMoreEvents && feedState.isLoaded else { return }
         
-        feedState = .loadingMore(currentItems)
-        
-        do {
-            let request = createFeedRequest(page: currentPage + 1)
-            let response = try await discoveryService.loadMoreEvents(for: request)
-            
-            let allItems = currentItems + response.items
-            feedState = .loaded(allItems)
-            hasMoreEvents = response.hasMore
-            currentPage += 1
-            
-        } catch {
-            // Revert to previous state on error
-            feedState = .loaded(currentItems)
-        }
+        // For now, we load all events at once, so no pagination needed
+        hasMoreEvents = false
     }
     
     func applyFilter() async {
+        // Apply current filter to events
+        // This would filter the existing events based on currentFilter
+        // For now, just refresh the feed
         await refreshFeed()
     }
     
     func applySorting() async {
+        // Apply current sort option to events
+        // This would sort the existing events based on currentSortOption
+        // For now, just refresh the feed
         await refreshFeed()
     }
     
@@ -115,6 +201,20 @@ class EventFeedViewModel: NSObject, ObservableObject {
         print("Bookmark toggled for event: \(item.event.title)")
     }
     
+    func createSampleEvents() async {
+        do {
+            print("🔄 Creating sample events...")
+            try await eventService.createSampleEvents()
+            print("✅ Sample events created successfully")
+            
+            // Reload the feed to show the new events
+            await loadInitialFeed()
+        } catch {
+            print("❌ Failed to create sample events: \(error)")
+            // Don't update feedState here, just log the error
+        }
+    }
+    
     // MARK: - Computed Properties
     
     var hasActiveFilters: Bool {
@@ -123,75 +223,71 @@ class EventFeedViewModel: NSObject, ObservableObject {
     
     // MARK: - Private Methods
     
-    private func createFeedRequest(page: Int) -> EventFeedRequest {
-        // For dummy login, create a fallback user ID if none exists
-        let userIdString = authService.currentUser?.id ?? "dummy-user-id"
-        guard let userId = UUID(uuidString: userIdString) else {
-            // If UUID creation fails, use a fallback UUID
-            let fallbackUserId = UUID()
-            return EventFeedRequest(
-                userId: fallbackUserId,
-                userLocation: currentLocation,
-                userVibeTags: userProfile?.vibeTags.map { $0.rawValue } ?? [],
-                friendIds: friendIds,
-                filter: currentFilter,
-                sortOption: currentSortOption,
-                page: page,
-                pageSize: 20
-            )
+    private func loadUserData() {
+        Task {
+            if let currentUser = authService.currentUser {
+                userProfile = try? await profileService.getProfile(for: currentUser.id)
+                // Load friend IDs if needed
+                friendIds = []
+            }
         }
-        
-        return EventFeedRequest(
-            userId: userId,
-            userLocation: currentLocation,
-            userVibeTags: userProfile?.vibeTags.map { $0.rawValue } ?? [],
-            friendIds: friendIds,
-            filter: currentFilter,
-            sortOption: currentSortOption,
-            page: page,
-            pageSize: 20
-        )
     }
     
-    private func loadUserData() {
-        // For dummy login, create a fallback user ID if none exists
-        let userIdString = authService.currentUser?.id ?? "dummy-user-id"
-        guard let userId = UUID(uuidString: userIdString) else { 
-            // If UUID creation fails, use a fallback UUID and continue
-            let fallbackUserId = UUID()
-            Task {
-                // Load user profile with fallback user
-                do {
-                    userProfile = try await profileService.getProfile(for: fallbackUserId)
-                } catch {
-                    // If profile loading fails, create a dummy profile
-                    userProfile = ProfileData(
-                        id: fallbackUserId,
-                        name: "Demo User",
-                        handle: "demo_user",
-                        avatar: nil,
-                        vibeTags: [.music, .social],
-                        bio: "Demo user for testing"
-                    )
-                }
-                friendIds = []
+    private func fetchHostProfiles(hostIds: [UUID]) async throws -> [ProfileData] {
+        var profiles: [ProfileData] = []
+        
+        for hostId in hostIds {
+            if let profile = try? await profileService.getProfile(for: hostId) {
+                profiles.append(profile)
             }
-            return 
         }
         
-        Task {
-            do {
-                // Load user profile
-                userProfile = try await profileService.getProfile(for: userId)
-                
-                // Load friend list (placeholder for now)
-                // This would typically come from a friends/social service
-                friendIds = []
-                
-            } catch {
-                print("Error loading user data: \(error)")
-            }
+        return profiles
+    }
+    
+    private func calculateEventScore(event: Event, hostProfile: ProfileData) -> Double {
+        var score: Double = 0.0
+        
+        // Base score from event properties
+        score += 0.3 // Base score
+        
+        // Time relevance (closer events get higher scores)
+        let timeUntilEvent = event.startTime.timeIntervalSinceNow
+        if timeUntilEvent > 0 {
+            let daysUntilEvent = timeUntilEvent / (24 * 60 * 60)
+            let timeScore = max(0, 1.0 - (daysUntilEvent / 30)) // 30 days max
+            score += timeScore * 0.2
         }
+        
+        // Host verification bonus
+        if hostProfile.isCurator {
+            score += 0.1
+        }
+        
+        // Vibe tag matching (if user has profile)
+        if let userProfile = userProfile {
+            let userTags = Set(userProfile.vibeTags.map { $0.rawValue })
+            let eventTags = Set(event.tags)
+            let matchingTags = userTags.intersection(eventTags)
+            let tagScore = Double(matchingTags.count) / Double(max(userTags.count, 1))
+            score += tagScore * 0.2
+        }
+        
+        // Price consideration (free events get slight boost)
+        if event.price == nil || event.price == 0 {
+            score += 0.05
+        }
+        
+        return min(1.0, score)
+    }
+    
+    private func calculateDistanceFromUser(event: Event) -> Double? {
+        guard let userLocation = currentLocation else { return nil }
+        
+        // For now, we'll use a default location for the event
+        // In a real implementation, this would use the event's actual coordinates
+        let eventLocation = CLLocation(latitude: 37.7749, longitude: -122.4194) // Default to SF
+        return userLocation.distance(from: eventLocation)
     }
     
     private func updateItemBookmarkStatus(_ itemId: UUID, isBookmarked: Bool) {
@@ -217,12 +313,30 @@ class EventFeedViewModel: NSObject, ObservableObject {
                     feedState = .refreshing(items)
                 case .loadingMore:
                     feedState = .loadingMore(items)
-                default:
+                case .idle, .loading, .error:
                     break
                 }
             }
         default:
             break
+        }
+    }
+    
+    private func getErrorMessage(for error: Error) -> String {
+        if let eventError = error as? EventError {
+            return eventError.localizedDescription
+        } else if let profileError = error as? ProfileError {
+            return profileError.localizedDescription
+        } else {
+            // Check for specific decoding errors
+            let errorString = error.localizedDescription
+            if errorString.contains("data couldn't be read") {
+                return "Unable to load events. Please try again later."
+            } else if errorString.contains("network") {
+                return "Network connection issue. Please check your internet connection."
+            } else {
+                return "Something went wrong. Please try again."
+            }
         }
     }
     
@@ -232,52 +346,38 @@ class EventFeedViewModel: NSObject, ObservableObject {
         locationManager = CLLocationManager()
         locationManager?.delegate = self
         locationManager?.desiredAccuracy = kCLLocationAccuracyBest
-        
-        updateLocationStatus()
     }
     
-    func requestLocationPermission() {
-        guard let locationManager = locationManager else { return }
-        
-        switch locationManager.authorizationStatus {
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-        case .denied, .restricted:
-            // Direct user to settings
-            if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(settingsUrl)
+    func requestLocationPermissionPublic() {
+        requestLocationPermission()
+    }
+    
+    private func requestLocationPermission() {
+        locationManager?.requestWhenInUseAuthorization()
+    }
+    
+    private func startLocationUpdates() {
+        locationManager?.startUpdatingLocation()
             }
-        case .authorizedWhenInUse, .authorizedAlways:
-            locationManager.startUpdatingLocation()
-        @unknown default:
-            break
-        }
+    
+    private func stopLocationUpdates() {
+        locationManager?.stopUpdatingLocation()
     }
     
-    private func updateLocationStatus() {
-        guard let locationManager = locationManager else { return }
-        
-        switch locationManager.authorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways:
-            isLocationEnabled = true
-            locationManager.startUpdatingLocation()
-            if currentLocation != nil {
-                locationDescription = "Current location"
+    private func updateLocationDescription() {
+        if let location = currentLocation {
+            let geocoder = CLGeocoder()
+            geocoder.reverseGeocodeLocation(location) { placemarks, error in
+                if let placemark = placemarks?.first {
+                    let city = placemark.locality ?? "Unknown"
+                    let state = placemark.administrativeArea ?? ""
+                    self.locationDescription = "\(city), \(state)"
             } else {
-                locationDescription = "Getting location..."
+                    self.locationDescription = "Location on"
+                }
             }
-        case .denied, .restricted:
-            isLocationEnabled = false
-            locationDescription = "Location disabled"
-            currentLocation = nil
-        case .notDetermined:
-            isLocationEnabled = false
-            locationDescription = "Location permission needed"
-            currentLocation = nil
-        @unknown default:
-            isLocationEnabled = false
-            locationDescription = "Location unavailable"
-            currentLocation = nil
+        } else {
+            locationDescription = "Location off"
         }
     }
 }
@@ -287,56 +387,82 @@ class EventFeedViewModel: NSObject, ObservableObject {
 extension EventFeedViewModel: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
-        
         Task { @MainActor in
             currentLocation = location
-            isLocationEnabled = true
-            locationDescription = "Current location"
+            updateLocationDescription()
             
-            // Stop updating location to save battery
-            manager.stopUpdatingLocation()
-            
-            // Refresh feed with new location
-            await refreshFeed()
+            // Update location-based filtering if needed
+            if isLocationEnabled {
+                // Could update feed based on new location
+            }
         }
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location error: \(error)")
+        print("Location manager failed with error: \(error)")
         Task { @MainActor in
-            isLocationEnabled = false
             locationDescription = "Location error"
-            currentLocation = nil
         }
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         Task { @MainActor in
-            updateLocationStatus()
-            
-            // Refresh feed when location permission changes
-            if status == .authorizedWhenInUse || status == .authorizedAlways {
-                await refreshFeed()
+            switch status {
+            case .authorizedWhenInUse, .authorizedAlways:
+                isLocationEnabled = true
+                startLocationUpdates()
+            case .denied, .restricted:
+                isLocationEnabled = false
+                stopLocationUpdates()
+            case .notDetermined:
+                isLocationEnabled = false
+                requestLocationPermission()
+            @unknown default:
+                isLocationEnabled = false
             }
         }
     }
 }
 
-// MARK: - Feed State Helpers
+// MARK: - EventFeedState
 
-extension EventFeedViewModel {
-    var isLoading: Bool {
-        feedState.isLoading
+enum EventFeedState {
+    case idle
+    case loading
+    case refreshing([EventFeedItem])
+    case loadingMore([EventFeedItem])
+    case loaded([EventFeedItem])
+    case error(String)
+    
+    var items: [EventFeedItem] {
+        switch self {
+        case .idle, .loading, .error:
+            return []
+        case .refreshing(let items), .loadingMore(let items), .loaded(let items):
+            return items
+        }
     }
     
-    var errorMessage: String? {
-        feedState.errorMessage
+    var isLoading: Bool {
+        switch self {
+        case .loading, .refreshing, .loadingMore:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    var isLoaded: Bool {
+        switch self {
+        case .loaded:
+            return true
+        default:
+            return false
+        }
     }
     
     var isEmpty: Bool {
-        switch feedState {
-        case .empty:
-            return true
+        switch self {
         case .loaded(let items):
             return items.isEmpty
         default:
@@ -345,93 +471,81 @@ extension EventFeedViewModel {
     }
 }
 
-// MARK: - Mock Data for Development
+// MARK: - EventFeedFilter
 
-#if DEBUG
-extension EventFeedViewModel {
-    static func createMockViewModel() -> EventFeedViewModel {
-        let viewModel = EventFeedViewModel()
-        
-        // Create mock feed items
-        let mockItems = [
-            EventFeedItem(
-                id: UUID(),
-                event: Event(
-                    hostId: UUID(),
-                    title: "Beach Volleyball Tournament",
-                    description: "Join us for an exciting tournament with great vibes!",
-                    vibe: "energetic",
-                    date: Date().addingTimeInterval(86400),
-                    location: EventLocation(
-                        name: "Manhattan Beach",
-                        address: "2000 The Strand",
-                        city: "Manhattan Beach",
-                        state: "CA",
-                        country: "USA",
-                        zipCode: "90266",
-                        latitude: 33.8847,
-                        longitude: -118.4109
-                    ),
-                    capacity: 50,
-                    price: 25.0
-                ),
-                host: EventHost(
-                    id: UUID(),
-                    name: "Alex Johnson",
-                    handle: "alexvolleyball",
-                    avatarUrl: nil,
-                    vibeTags: ["energetic", "outdoorsy"],
-                    isVerified: true
-                ),
-                score: 0.85,
-                attendeeCount: 23,
-                friendsAttending: [],
-                isBookmarked: false,
-                distanceFromUser: 2500.0
-            ),
-            EventFeedItem(
-                id: UUID(),
-                event: Event(
-                    hostId: UUID(),
-                    title: "Coffee & Code Meetup",
-                    description: "Weekly gathering for developers to network and share ideas.",
-                    vibe: "chill",
-                    date: Date().addingTimeInterval(172800),
-                    location: EventLocation(
-                        name: "Local Coffee Shop",
-                        address: "123 Main St",
-                        city: "San Francisco",
-                        state: "CA",
-                        country: "USA",
-                        zipCode: "94102",
-                        latitude: 37.7749,
-                        longitude: -122.4194
-                    ),
-                    capacity: 30,
-                    price: nil
-                ),
-                host: EventHost(
-                    id: UUID(),
-                    name: "Sarah Chen",
-                    handle: "sarahcodes",
-                    avatarUrl: nil,
-                    vibeTags: ["chill", "intellectual"],
-                    isVerified: false
-                ),
-                score: 0.72,
-                attendeeCount: 15,
-                friendsAttending: [],
-                isBookmarked: true,
-                distanceFromUser: 5000.0
-            )
-        ]
-        
-        viewModel.feedState = .loaded(mockItems)
-        viewModel.lastUpdated = Date()
-        viewModel.isLocationEnabled = true
-        viewModel.locationDescription = "Current location"
-        
-        return viewModel
+enum EventFeedFilter {
+    case all
+    case today
+    case thisWeek
+    case thisMonth
+    case free
+    case paid
+    
+    static var `default`: EventFeedFilter { .all }
+    
+    var displayName: String {
+        switch self {
+        case .all: return "All Events"
+        case .today: return "Today"
+        case .thisWeek: return "This Week"
+        case .thisMonth: return "This Month"
+        case .free: return "Free"
+        case .paid: return "Paid"
+        }
     }
 }
-#endif 
+
+// MARK: - EventFeedSortOption
+
+enum EventFeedSortOption: CaseIterable {
+    case relevance
+    case date
+    case distance
+    case popularity
+    
+    static var allCases: [EventFeedSortOption] {
+        return [.relevance, .date, .distance, .popularity]
+    }
+    
+    var displayName: String {
+        switch self {
+        case .relevance: return "Relevance"
+        case .date: return "Date"
+        case .distance: return "Distance"
+        case .popularity: return "Popularity"
+        }
+    }
+    
+    var systemImage: String {
+        switch self {
+        case .relevance: return "star"
+        case .date: return "calendar"
+        case .distance: return "location"
+        case .popularity: return "flame"
+        }
+    }
+}
+
+// MARK: - EventFeedItem
+
+struct EventFeedItem: Identifiable {
+    let id: UUID
+    let event: Event
+    let host: EventHost
+    let score: Double
+    let attendeeCount: Int
+    let friendsAttending: [UUID]
+    let isBookmarked: Bool
+    let distanceFromUser: Double?
+}
+
+// MARK: - EventHost
+
+struct EventHost: Identifiable {
+    let id: UUID
+    let name: String
+    let handle: String
+    let avatarUrl: String?
+    let vibeTags: [VibeTag]
+    let isVerified: Bool
+} 

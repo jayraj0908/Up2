@@ -1,6 +1,144 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Event Model for Supabase Integration
+
+struct Event: Codable, Identifiable {
+    let id: UUID
+    let hostId: UUID
+    let title: String
+    let description: String
+    let imageUrl: String?
+    let tags: [String]
+    let location: String
+    let startTime: Date
+    let endTime: Date
+    let isPublic: Bool
+    let capacity: Int?
+    let price: Double?
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hostId = "host_id"
+        case title
+        case description
+        case imageUrl = "image_url"
+        case tags
+        case location
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case isPublic = "is_public"
+        case capacity
+        case price
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+    
+    init(
+        id: UUID = UUID(),
+        hostId: UUID,
+        title: String,
+        description: String,
+        imageUrl: String? = nil,
+        tags: [String] = [],
+        location: String,
+        startTime: Date,
+        endTime: Date,
+        isPublic: Bool = true,
+        capacity: Int? = nil,
+        price: Double? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.hostId = hostId
+        self.title = title
+        self.description = description
+        self.imageUrl = imageUrl
+        self.tags = tags
+        self.location = location
+        self.startTime = startTime
+        self.endTime = endTime
+        self.isPublic = isPublic
+        self.capacity = capacity
+        self.price = price
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+    
+    // Computed properties
+    var isUpcoming: Bool {
+        return startTime > Date()
+    }
+    
+    var isActive: Bool {
+        let now = Date()
+        return startTime <= now && endTime >= now
+    }
+    
+    var isCompleted: Bool {
+        return endTime < Date()
+    }
+    
+    var duration: TimeInterval {
+        return endTime.timeIntervalSince(startTime)
+    }
+    
+    var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: startTime)
+    }
+    
+    var formattedTime: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: startTime)
+    }
+    
+    var isFree: Bool {
+        return price == nil || price == 0
+    }
+    var formattedPrice: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        return isFree ? "Free" : (formatter.string(from: NSNumber(value: price ?? 0)) ?? "$0")
+    }
+}
+
+// MARK: - Event Creation Request
+struct EventCreationRequest: Codable {
+    let hostId: UUID
+    let title: String
+    let description: String
+    let imageUrl: String?
+    let tags: [String]
+    let location: String
+    let startTime: Date
+    let endTime: Date
+    let isPublic: Bool
+    let capacity: Int?
+    let price: Double?
+}
+
+// MARK: - Event Update Request
+struct EventUpdateRequest: Codable {
+    let title: String?
+    let description: String?
+    let imageUrl: String?
+    let tags: [String]?
+    let location: String?
+    let startTime: Date?
+    let endTime: Date?
+    let isPublic: Bool?
+    let capacity: Int?
+    let price: Double?
+}
+
 // MARK: - Event Type Definitions
 
 enum EventType: String, CaseIterable, Codable {
@@ -363,5 +501,78 @@ enum EventValidationError: LocalizedError {
         case .eventInFuture:
             return "Event cannot be in the future"
         }
+    }
+}
+
+// MARK: - RSVP Status
+
+enum RSVPStatus: String, CaseIterable, Codable {
+    case confirmed = "confirmed"
+    case pending = "pending"
+    case declined = "declined"
+    
+    var displayName: String {
+        switch self {
+        case .confirmed: return "Confirmed"
+        case .pending: return "Pending"
+        case .declined: return "Declined"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .confirmed: return .green
+        case .pending: return .orange
+        case .declined: return .red
+        }
+    }
+}
+
+// MARK: - Supabase Event Model
+struct EventModel: Codable {
+    let id: UUID
+    let hostId: UUID
+    let title: String
+    let description: String
+    let vibe: String
+    let startTime: Date
+    let endTime: Date
+    let locationName: String
+    let locationAddress: String
+    let locationCity: String
+    let locationState: String
+    let locationCountry: String
+    let locationZipCode: String
+    let locationLatitude: Double
+    let locationLongitude: Double
+    let capacity: Int
+    let price: Double
+    let isPrivate: Bool
+    let mediaRefs: [String]
+    let createdAt: Date
+    let updatedAt: Date
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hostId = "host_id"
+        case title
+        case description
+        case vibe
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case locationName = "location_name"
+        case locationAddress = "location_address"
+        case locationCity = "location_city"
+        case locationState = "location_state"
+        case locationCountry = "location_country"
+        case locationZipCode = "location_zip_code"
+        case locationLatitude = "location_latitude"
+        case locationLongitude = "location_longitude"
+        case capacity
+        case price
+        case isPrivate = "is_private"
+        case mediaRefs = "media_refs"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 } 

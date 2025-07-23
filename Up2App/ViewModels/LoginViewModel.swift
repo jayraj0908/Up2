@@ -8,33 +8,15 @@ class LoginViewModel: ObservableObject {
     @Published var loginData = LoginData()
     @Published var loginState: LoginState = .inputCredentials
     @Published var emailValidation: ValidationResult = .valid
-    @Published var phoneValidation: ValidationResult = .valid
-    @Published var verificationCodeValidation: ValidationResult = .valid
+    @Published var passwordValidation: ValidationResult = .valid
     @Published var isLoading = false
     
     // MARK: - Computed Properties
-    var currentInputValue: String {
-        switch loginData.inputMethod {
-        case .email:
-            return loginData.emailAddress
-        case .phone:
-            return loginData.phoneNumber
-        }
-    }
-    
     var isCurrentInputValid: Bool {
-        switch loginData.inputMethod {
-        case .email:
-            return emailValidation.isValid && !loginData.emailAddress.isEmpty
-        case .phone:
-            return phoneValidation.isValid && !loginData.phoneNumber.isEmpty
-        }
-    }
-    
-    // MARK: - Input Method Toggle
-    func selectInputMethod(_ method: LoginInputMethod) {
-        loginData.inputMethod = method
-        clearValidationErrors()
+        return emailValidation.isValid && 
+               !loginData.emailAddress.isEmpty && 
+               passwordValidation.isValid && 
+               !loginData.password.isEmpty
     }
     
     // MARK: - Input Updates
@@ -43,85 +25,58 @@ class LoginViewModel: ObservableObject {
         emailValidation = ValidationService.validateEmail(email)
     }
     
-    func updatePhoneNumber(_ phone: String) {
-        loginData.phoneNumber = phone
-        phoneValidation = ValidationService.validatePhoneNumber(phone)
-    }
-    
-    func updateVerificationCode(_ code: String) {
-        loginData.verificationCode = code
-        verificationCodeValidation = ValidationService.validateVerificationCode(code)
+    func updatePassword(_ password: String) {
+        loginData.password = password
+        passwordValidation = ValidationService.validatePassword(password)
     }
     
     // MARK: - Login Flow
-    func sendVerificationCode() {
+    func signIn() {
         guard isCurrentInputValid else { return }
+        
+        // Check network connectivity first
+        guard SupabaseManager.shared.checkNetworkConnectivity() else {
+            loginState = .error("No internet connection. Please check your network and try again.")
+            return
+        }
         
         isLoading = true
         clearValidationErrors()
         
         Task {
             do {
-                switch loginData.inputMethod {
-                case .email:
-                    _ = try await SupabaseAuthService.shared.signInWithEmail(loginData.emailAddress)
-                case .phone:
-                    _ = try await SupabaseAuthService.shared.signInWithPhone(loginData.phoneNumber)
-                }
+                print("🔄 Starting sign in process...")
                 
-                await MainActor.run {
-                    self.isLoading = false
-                    self.loginState = .awaitingVerification
-                }
+                // Reset session before attempting sign in to ensure clean state
+                await SupabaseAuthService.shared.resetSession()
                 
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    self.loginState = .error(error.localizedDescription)
-                }
-            }
-        }
-    }
-    
-    func verifyCodeAndLogin() {
-        guard verificationCodeValidation.isValid else { return }
-        
-        isLoading = true
-        loginState = .verifying
-        
-        Task {
-            do {
-                let verifiedUser = try await SupabaseAuthService.shared.verifyLoginOTP(
-                    code: loginData.verificationCode,
-                    email: loginData.inputMethod == .email ? loginData.emailAddress : nil,
-                    phone: loginData.inputMethod == .phone ? loginData.phoneNumber : nil
+                let user = try await SupabaseAuthService.shared.signInWithEmail(
+                    loginData.emailAddress,
+                    password: loginData.password
                 )
                 
-                // Set the current user in app state and handle login completion
+                print("✅ Sign in successful for user: \(user.email ?? "unknown")")
+                
                 await MainActor.run {
-                    AppStateManager.shared.setCurrentUser(verifiedUser)
-                    AppStateManager.shared.handleLoginComplete()
                     self.isLoading = false
                     self.loginState = .completed
                 }
                 
+                // Let AppStateManager handle the navigation automatically
+                // The session observer will update the app flow
+                
             } catch {
+                print("❌ Sign in failed: \(error)")
+                
                 await MainActor.run {
                     self.isLoading = false
-                    self.loginState = .error(error.localizedDescription)
+                    
+                    // Provide more specific error messages
+                    let errorMessage = getErrorMessage(for: error)
+                    self.loginState = .error(errorMessage)
                 }
             }
         }
-    }
-    
-    func resendVerificationCode() {
-        sendVerificationCode()
-    }
-    
-    func goBackToCredentials() {
-        loginState = .inputCredentials
-        clearVerificationCode()
-        clearValidationErrors()
     }
     
     func resetLogin() {
@@ -134,12 +89,43 @@ class LoginViewModel: ObservableObject {
     // MARK: - Helper Methods
     private func clearValidationErrors() {
         emailValidation = .valid
-        phoneValidation = .valid
-        verificationCodeValidation = .valid
+        passwordValidation = .valid
     }
     
-    private func clearVerificationCode() {
-        loginData.verificationCode = ""
-        verificationCodeValidation = .valid
+    private func getErrorMessage(for error: Error) -> String {
+        if let authError = error as? AuthError {
+            return authError.localizedDescription
+        }
+        
+        let errorString = error.localizedDescription.lowercased()
+        let nsError = error as NSError
+        
+        // Check for network connectivity issues
+        if nsError.domain == NSURLErrorDomain {
+            switch nsError.code {
+            case NSURLErrorNotConnectedToInternet, NSURLErrorNetworkConnectionLost:
+                return "Network connection lost. Please check your internet connection and try again."
+            case NSURLErrorTimedOut:
+                return "Request timed out. Please check your connection and try again."
+            case NSURLErrorCannotConnectToHost:
+                return "Cannot connect to server. Please try again later."
+            default:
+                break
+            }
+        }
+        
+        if errorString.contains("network") || errorString.contains("connection") || errorString.contains("lost") {
+            return "Network error. Please check your connection and try again."
+        } else if errorString.contains("invalid_credentials") || errorString.contains("invalid credentials") {
+            return "Invalid email or password. Please check your credentials and try again."
+        } else if errorString.contains("user_already_registered") || errorString.contains("already registered") {
+            return "An account with this email already exists."
+        } else if errorString.contains("rate_limit") || errorString.contains("too many") {
+            return "Too many attempts. Please wait a moment before trying again."
+        } else if errorString.contains("session") || errorString.contains("token") {
+            return "Session expired. Please try signing in again."
+        } else {
+            return "An unexpected error occurred. Please try again."
+        }
     }
 } 

@@ -10,16 +10,18 @@ struct ProfileData: Codable, Identifiable {
     var avatar: String? // URL to avatar image in Supabase Storage
     var vibeTags: [VibeTag]
     var bio: String
+    var isCurator: Bool
     var createdAt: Date
     var updatedAt: Date
     
-    init(id: UUID = UUID(), name: String = "", handle: String = "", avatar: String? = nil, vibeTags: [VibeTag] = [], bio: String = "", createdAt: Date? = nil, updatedAt: Date? = nil) {
+    init(id: UUID = UUID(), name: String = "", handle: String = "", avatar: String? = nil, vibeTags: [VibeTag] = [], bio: String = "", isCurator: Bool = false, createdAt: Date? = nil, updatedAt: Date? = nil) {
         self.id = id
         self.name = name
         self.handle = handle
         self.avatar = avatar
         self.vibeTags = vibeTags
         self.bio = bio
+        self.isCurator = isCurator
         self.createdAt = createdAt ?? Date()
         self.updatedAt = updatedAt ?? Date()
     }

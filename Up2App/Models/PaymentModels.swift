@@ -502,7 +502,7 @@ extension Ticket {
 
 /// Commission rate structure
 struct CommissionRate: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     let eventType: String
     let rate: Double
     let description: String
@@ -511,7 +511,7 @@ struct CommissionRate: Identifiable, Codable {
 
 /// Revenue sharing structure
 struct RevenueShare: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     let eventId: String
     let hostShare: Double
     let platformShare: Double
