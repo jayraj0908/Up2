@@ -12,6 +12,7 @@ struct MoreTabView: View {
     @State private var showingDebug = false
     @State private var showingHostDashboard = false
     @State private var showingBecomeHost = false
+    @State private var showingDropshippingStarter = false
     @State private var showingLoginSheet = false
     
     // MARK: - Soft Gate Overlay
@@ -117,6 +118,9 @@ struct MoreTabView: View {
             .sheet(isPresented: $showingLoginSheet) {
                 LoginView()
             }
+            .sheet(isPresented: $showingDropshippingStarter) {
+                HeadlessDropshippingStarterView()
+            }
         }
     }
     
@@ -183,7 +187,7 @@ struct MoreTabView: View {
             ) {
                 // TODO: Navigate to help
             }
-            
+
             MoreRow(
                 icon: "doc.text",
                 title: "Terms of Service",
@@ -194,7 +198,18 @@ struct MoreTabView: View {
             ) {
                 // TODO: Navigate to terms
             }
-            
+
+            MoreRow(
+                icon: "globe",
+                title: "Dropshipping Starter",
+                subtitle: "View the headless starter repository",
+                color: Color.pink,
+                badge: nil,
+                isLocked: false
+            ) {
+                showingDropshippingStarter = true
+            }
+
             MoreRow(
                 icon: "hand.raised",
                 title: "Privacy Policy",
